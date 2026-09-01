@@ -1,0 +1,31 @@
+{
+  "source": "Forgejo 15.0.7 swagger.v1.json captured from Monad on 2026-08-27",
+  "routes": {
+    "GET /user": {
+      "operationId": "userGetCurrent",
+      "success": 200,
+      "response": "User",
+      "required_response_fields": ["login"]
+    },
+    "GET /repos/{owner}/{repo}": {
+      "operationId": "repoGet",
+      "path_parameters": ["owner", "repo"],
+      "success": 200,
+      "response": "Repository",
+      "required_response_fields": [
+        "name",
+        "full_name",
+        "description",
+        "private",
+        "archived",
+        "default_branch",
+        "html_url"
+      ]
+    }
+  },
+  "paging": {
+    "query_parameters": ["page", "limit"],
+    "headers": ["Link", "x-total-count"]
+  }
+}
+

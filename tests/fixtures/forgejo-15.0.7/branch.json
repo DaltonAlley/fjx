@@ -1,0 +1,9 @@
+{
+  "name": "main",
+  "commit": {"id": "abc123", "message": "head"},
+  "protected": true,
+  "enable_status_check": true,
+  "required_approvals": 1,
+  "user_can_merge": true,
+  "user_can_push": false
+}

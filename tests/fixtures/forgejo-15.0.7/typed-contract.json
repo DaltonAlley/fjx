@@ -1,0 +1,27 @@
+{
+  "source": "Forgejo 15.0.7 swagger.v1.json captured from Monad on 2026-08-27",
+  "routes": {
+    "issue.list_create": "/repos/{owner}/{repo}/issues",
+    "issue.view_edit": "/repos/{owner}/{repo}/issues/{index}",
+    "issue.comment": "/repos/{owner}/{repo}/issues/{index}/comments",
+    "pr.list_create": "/repos/{owner}/{repo}/pulls",
+    "pr.view_edit": "/repos/{owner}/{repo}/pulls/{index}",
+    "pr.diff": "/repos/{owner}/{repo}/pulls/{index}.{diffType}",
+    "pr.review": "/repos/{owner}/{repo}/pulls/{index}/reviews",
+    "pr.merge": "/repos/{owner}/{repo}/pulls/{index}/merge",
+    "checks": "/repos/{owner}/{repo}/commits/{ref}/status",
+    "run.list": "/repos/{owner}/{repo}/actions/runs",
+    "run.view": "/repos/{owner}/{repo}/actions/runs/{run_id}"
+  },
+  "payload_keys": {
+    "CreateIssueOption": ["title", "body"],
+    "EditIssueOption": ["state"],
+    "CreateIssueCommentOption": ["body"],
+    "CreatePullRequestOption": ["head", "title", "base", "body"],
+    "EditPullRequestOption": ["state"],
+    "CreatePullReviewOptions": ["event", "body"],
+    "MergePullRequestOption": ["Do", "MergeTitleField", "MergeMessageField", "delete_branch_after_merge"]
+  },
+  "action_run_list_shape": ["total_count", "workflow_runs"],
+  "draft_create": "Forgejo 15.0.7 CreatePullRequestOption has no draft key; fjx uses the default WIP: title prefix"
+}

@@ -1,0 +1,15 @@
+{
+  "number": 8,
+  "title": "Typed pull request",
+  "body": "Pull request body",
+  "html_url": "https://forge.example/dalton/monolith/pulls/8",
+  "user": { "login": "dalton" },
+  "state": "open",
+  "draft": false,
+  "mergeable": null,
+  "base": { "ref": "main", "sha": "def456" },
+  "head": { "ref": "feature", "sha": "abc123" },
+  "created_at": "2026-08-27T12:00:00Z",
+  "updated_at": "2026-08-27T13:00:00Z",
+  "future_field": true
+}

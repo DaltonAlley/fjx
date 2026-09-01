@@ -1,0 +1,23 @@
+{
+  "source": "Forgejo 15.0.7 templates/swagger/v1_json.tmpl from the official v15.0.7 tag",
+  "routes": {
+    "release.list_create": "/repos/{owner}/{repo}/releases",
+    "release.view_by_tag": "/repos/{owner}/{repo}/releases/tags/{tag}",
+    "release.upload": "/repos/{owner}/{repo}/releases/{id}/assets",
+    "label.list_create": "/repos/{owner}/{repo}/labels",
+    "milestone.list_create": "/repos/{owner}/{repo}/milestones",
+    "branch.list": "/repos/{owner}/{repo}/branches",
+    "branch.delete": "/repos/{owner}/{repo}/branches/{branch}",
+    "workflow.dispatch": "/repos/{owner}/{repo}/actions/workflows/{workflowfilename}/dispatches"
+  },
+  "payload_keys": {
+    "CreateReleaseOption": ["tag_name", "name", "body", "target_commitish", "draft", "prerelease"],
+    "CreateLabelOption": ["name", "color", "description"],
+    "CreateMilestoneOption": ["title", "description", "due_on"],
+    "DispatchWorkflowOption": ["ref", "inputs", "return_run_info"]
+  },
+  "release_upload": {
+    "content_type": "application/octet-stream",
+    "query_parameters": ["name"]
+  }
+}

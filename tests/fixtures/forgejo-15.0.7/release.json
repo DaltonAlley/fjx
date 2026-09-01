@@ -1,0 +1,12 @@
+{
+  "id": 7,
+  "tag_name": "v1.2.3",
+  "name": "Version 1.2.3",
+  "body": "Release notes",
+  "html_url": "https://forgejo.example/dalton/monolith/releases/tag/v1.2.3",
+  "draft": false,
+  "prerelease": false,
+  "target_commitish": "main",
+  "created_at": "2026-08-29T12:00:00Z",
+  "published_at": "2026-08-29T12:01:00Z"
+}

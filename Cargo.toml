@@ -1,0 +1,22 @@
+[package]
+name = "fjx"
+version = "0.2.0"
+edition = "2024"
+publish = false
+description = "A small, stable Forgejo command-line client"
+license = "MIT"
+
+[dependencies]
+lexopt = "=0.3.1"
+rpassword = "=7.4.0"
+serde = { version = "=1.0.219", features = ["derive"] }
+serde_json = "=1.0.142"
+ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"

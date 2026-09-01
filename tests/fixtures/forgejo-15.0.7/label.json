@@ -1,0 +1,9 @@
+{
+  "id": 3,
+  "name": "bug",
+  "color": "d73a4a",
+  "description": "Something is not working",
+  "exclusive": false,
+  "is_archived": false,
+  "url": "https://forgejo.example/api/v1/repos/dalton/monolith/labels/3"
+}

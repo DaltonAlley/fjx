@@ -1,0 +1,13 @@
+{
+  "number": 12,
+  "title": "Typed issue",
+  "body": "Issue body",
+  "html_url": "https://forge.example/dalton/monolith/issues/12",
+  "user": { "login": "dalton" },
+  "state": "open",
+  "labels": [{ "name": "bug" }],
+  "assignees": [{ "login": "reviewer" }],
+  "created_at": "2026-08-27T12:00:00Z",
+  "updated_at": "2026-08-27T13:00:00Z",
+  "future_field": true
+}

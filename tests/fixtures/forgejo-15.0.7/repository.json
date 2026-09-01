@@ -1,0 +1,11 @@
+{
+  "id": 11,
+  "name": "monolith",
+  "full_name": "dalton/monolith",
+  "description": null,
+  "private": true,
+  "archived": false,
+  "default_branch": "main",
+  "html_url": "https://forge.example/dalton/monolith",
+  "future_field": {"ignored": true}
+}

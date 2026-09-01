@@ -1,0 +1,55 @@
+schema = 1
+
+[[targets]]
+triple = "x86_64-unknown-linux-gnu"
+os = "linux"
+arch = "x86_64"
+archive = "tar.gz"
+executable = "fjx"
+file_pattern = "ELF 64-bit LSB.*x86-64.*dynamically linked"
+runtime = "linux/amd64"
+
+[[targets]]
+triple = "aarch64-unknown-linux-gnu"
+os = "linux"
+arch = "aarch64"
+archive = "tar.gz"
+executable = "fjx"
+file_pattern = "ELF 64-bit LSB.*ARM aarch64.*dynamically linked"
+runtime = "linux/arm64"
+
+[[targets]]
+triple = "x86_64-unknown-linux-musl"
+os = "linux"
+arch = "x86_64"
+archive = "tar.gz"
+executable = "fjx"
+file_pattern = "ELF 64-bit LSB.*x86-64.*(statically|static-pie) linked"
+runtime = "linux/amd64"
+
+[[targets]]
+triple = "aarch64-unknown-linux-musl"
+os = "linux"
+arch = "aarch64"
+archive = "tar.gz"
+executable = "fjx"
+file_pattern = "ELF 64-bit LSB.*ARM aarch64.*(statically|static-pie) linked"
+runtime = "linux/arm64"
+
+[[targets]]
+triple = "aarch64-apple-darwin"
+os = "macos"
+arch = "aarch64"
+archive = "tar.gz"
+executable = "fjx"
+file_pattern = "Mach-O 64-bit arm64 executable"
+runtime = "none"
+
+[[targets]]
+triple = "x86_64-pc-windows-gnu"
+os = "windows"
+arch = "x86_64"
+archive = "zip"
+executable = "fjx.exe"
+file_pattern = "PE32\\+ executable.*MS Windows.*x86-64"
+runtime = "wine"

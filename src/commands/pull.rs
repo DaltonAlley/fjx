@@ -1,8 +1,9 @@
+use std::ffi::OsStr;
 use std::fmt::Write;
 
 use serde::{Deserialize, Serialize};
 
-use crate::args::{Args, BodySource, PullArgs, ReviewEvent};
+use crate::args::{Args, BodySource, MetadataArgs, PageArgs, PullArgs, ReviewEvent};
 use crate::error::Error;
 use crate::output::{Outcome, plain_field};
 
@@ -11,6 +12,131 @@ use super::typed::{
 };
 
 const STATUS_PAGE_LIMIT: usize = 50;
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InlineComment {
+    body: String,
+    path: String,
+    #[serde(default)]
+    old_position: i64,
+    #[serde(default)]
+    new_position: i64,
+}
+
+fn read_inline_comments(path: &OsStr, commit: Option<&str>) -> Result<Vec<InlineComment>, Error> {
+    if !commit.is_some_and(|sha| {
+        matches!(sha.len(), 40 | 64) && sha.bytes().all(|b| b.is_ascii_hexdigit())
+    }) {
+        return Err(Error::usage(
+            "inline review comments require an explicit --commit SHA",
+        ));
+    }
+    let text = read_body(&BodySource::File(path.to_owned()))?;
+    let comments: Vec<InlineComment> = serde_json::from_str(&text)
+        .map_err(|e| Error::usage(format!("invalid review comments JSON: {e}")))?;
+    if comments.is_empty() || comments.len() > MAX_ITEMS {
+        return Err(Error::usage(
+            "review comments must contain 1 to 1,000 items",
+        ));
+    }
+    for comment in &comments {
+        if comment.body.trim().is_empty()
+            || comment
+                .body
+                .chars()
+                .any(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r'))
+            || comment.path.is_empty()
+            || comment.path.starts_with('/')
+            || comment
+                .path
+                .split('/')
+                .any(|part| matches!(part, "" | "." | ".."))
+            || comment.path.chars().any(char::is_control)
+            || comment.old_position < 0
+            || comment.new_position < 0
+            || (comment.old_position == 0) == (comment.new_position == 0)
+        {
+            return Err(Error::usage(
+                "review comment requires a safe body, repository path, and exactly one positive line position",
+            ));
+        }
+    }
+    Ok(comments)
+}
+
+fn collection(
+    common: &Args,
+    number: u64,
+    suffix: &str,
+    paging: &PageArgs,
+    kind: &str,
+) -> Result<Outcome, Error> {
+    reject_read_flags(common, "pr collection")?;
+    let repo = RepoClient::resolve(common)?;
+    let values: Vec<serde_json::Value> = collect_arrays(&repo, &repo.path(suffix), paging, kind)?;
+    let mut records = Vec::new();
+    let mut text = String::new();
+    for value in values {
+        let record = if kind == "file" {
+            let filename = value
+                .get("filename")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| Error::data("changed file has no filename"))?;
+            serde_json::json!({"kind":kind,"number":number,"id":filename,"filename":filename,"previous_filename":value.get("previous_filename"),"status":value.get("status"),"additions":value.get("additions"),"deletions":value.get("deletions"),"changes":value.get("changes")})
+        } else {
+            let id = value
+                .get("id")
+                .and_then(serde_json::Value::as_u64)
+                .filter(|id| *id > 0)
+                .ok_or_else(|| Error::data("review or comment has no stable ID"))?;
+            serde_json::json!({"kind":kind,"number":number,"id":id,"body":value.get("body"),"author":value.pointer("/user/login"),"state":value.get("state"),"html_url":value.get("html_url"),"created_at":value.get("created_at"),"updated_at":value.get("updated_at"),"commit_id":value.get("commit_id"),"path":value.get("path"),"old_position":value.get("original_position"),"new_position":value.get("position"),"pull_request_review_id":value.get("pull_request_review_id")})
+        };
+        writeln!(
+            &mut text,
+            "{}\t{}\t{}",
+            plain_field(
+                &record["id"]
+                    .as_str()
+                    .map_or_else(|| record["id"].to_string(), str::to_owned)
+            ),
+            plain_field(record["author"].as_str().unwrap_or("")),
+            plain_field(
+                record["body"]
+                    .as_str()
+                    .or(record["filename"].as_str())
+                    .unwrap_or("")
+            )
+        )
+        .map_err(|e| Error::data(e.to_string()))?;
+        records.push(record);
+    }
+    if common.json {
+        Outcome::json(&records)
+    } else {
+        Ok(Outcome::text(text))
+    }
+}
+
+fn request_review(
+    common: &Args,
+    number: u64,
+    reviewers: &[String],
+    teams: &[String],
+) -> Result<Outcome, Error> {
+    reject_yes(common, "pr request-review")?;
+    if reviewers.is_empty() && teams.is_empty() {
+        return Err(Error::usage("request-review requires reviewers or teams"));
+    }
+    let repo = RepoClient::resolve(common)?;
+    let path = repo.path(&format!("pulls/{number}/requested_reviewers"));
+    let payload = serde_json::json!({"reviewers":reviewers,"team_reviewers":teams});
+    if common.dry_run {
+        return repo.dry_run(common.json, "POST", &path, &payload);
+    }
+    repo.write_empty("POST", &path, &payload)?;
+    result(common.json, "pr.request-review", number, None)
+}
 
 #[derive(Deserialize)]
 struct User {
@@ -25,6 +151,15 @@ struct Branch {
 
 #[derive(Deserialize)]
 struct PullResponse {
+    #[serde(default)]
+    merged: bool,
+    merged_at: Option<String>,
+    merge_commit_sha: Option<String>,
+    #[serde(default)]
+    labels: Vec<serde_json::Value>,
+    milestone: Option<serde_json::Value>,
+    #[serde(default)]
+    assignees: Vec<serde_json::Value>,
     number: u64,
     title: String,
     body: String,
@@ -41,6 +176,12 @@ struct PullResponse {
 
 #[derive(Serialize)]
 struct PullRecord {
+    merged: bool,
+    merged_at: Option<String>,
+    merge_commit_sha: Option<String>,
+    labels: Vec<serde_json::Value>,
+    milestone: Option<serde_json::Value>,
+    assignees: Vec<serde_json::Value>,
     kind: &'static str,
     number: u64,
     title: String,
@@ -71,6 +212,12 @@ impl TryFrom<PullResponse> for PullRecord {
             }
         };
         Ok(Self {
+            merged: value.merged,
+            merged_at: value.merged_at,
+            merge_commit_sha: value.merge_commit_sha,
+            labels: value.labels,
+            milestone: value.milestone,
+            assignees: value.assignees,
             kind: "pull_request",
             number: value.number,
             title: value.title,
@@ -91,6 +238,8 @@ impl TryFrom<PullResponse> for PullRecord {
 
 #[derive(Serialize)]
 struct CreatePull<'a> {
+    #[serde(flatten)]
+    metadata: serde_json::Value,
     head: &'a str,
     title: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,6 +265,10 @@ struct CommentResponse {
 
 #[derive(Serialize)]
 struct ReviewBody<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commit_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comments: Option<Vec<InlineComment>>,
     event: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     body: Option<&'a str>,
@@ -123,11 +276,16 @@ struct ReviewBody<'a> {
 
 #[derive(Deserialize)]
 struct ReviewResponse {
+    id: Option<u64>,
     html_url: Option<String>,
 }
 
 #[derive(Serialize)]
 struct MergeBody<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    head_commit_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    merge_when_checks_succeed: bool,
     #[serde(rename = "Do")]
     style: &'static str,
     #[serde(rename = "MergeTitleField", skip_serializing_if = "Option::is_none")]
@@ -186,12 +344,35 @@ struct StatusRecord {
     target_url: Option<String>,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "dispatch keeps PR command routes together"
+)]
 pub(crate) fn run(common: &Args, args: &PullArgs) -> Result<Outcome, Error> {
     match args {
-        PullArgs::List { state, paging } => {
+        PullArgs::List {
+            state,
+            paging,
+            filters,
+        } => {
             reject_read_flags(common, "pr list")?;
             let repo = RepoClient::resolve(common)?;
-            let path = repo.path(&format!("pulls?state={}", state.as_str()));
+            let mut path = repo.path(&format!("pulls?state={}", state.as_str()));
+            for id in super::triage::resolve_labels(&repo, &filters.labels, &[])? {
+                write!(&mut path, "&labels={id}").map_err(|e| Error::data(e.to_string()))?;
+            }
+            let milestone =
+                super::triage::resolve_milestone(&repo, filters.milestone.as_deref(), None)?;
+            for (key, value) in [
+                ("poster", filters.author.clone()),
+                ("milestone", milestone.map(|id| id.to_string())),
+                ("sort", filters.sort.clone()),
+            ] {
+                if let Some(value) = value {
+                    write!(&mut path, "&{key}={}", encode_path(&value))
+                        .map_err(|e| Error::data(e.to_string()))?;
+                }
+            }
             let values: Vec<PullResponse> =
                 collect_arrays(&repo, &path, paging, "pull request list")?;
             render_list(common.json, values)
@@ -203,7 +384,16 @@ pub(crate) fn run(common: &Args, args: &PullArgs) -> Result<Outcome, Error> {
             base,
             body,
             draft,
-        } => create(common, head, title, base.as_deref(), body.as_ref(), *draft),
+            metadata,
+        } => create(
+            common,
+            head,
+            title,
+            base.as_deref(),
+            body.as_ref(),
+            *draft,
+            metadata,
+        ),
         PullArgs::Diff { number } => diff(common, *number),
         PullArgs::Checks { number } => checks(common, *number),
         PullArgs::Comment { number, body } => comment(common, *number, body),
@@ -211,13 +401,24 @@ pub(crate) fn run(common: &Args, args: &PullArgs) -> Result<Outcome, Error> {
             number,
             event,
             body,
-        } => review(common, *number, *event, body.as_ref()),
+            comments_file,
+            commit,
+        } => review(
+            common,
+            *number,
+            *event,
+            body.as_ref(),
+            comments_file.as_deref(),
+            commit.as_deref(),
+        ),
         PullArgs::Merge {
             number,
             style,
             title,
             message,
             delete_branch,
+            match_head,
+            auto,
         } => merge(
             common,
             *number,
@@ -225,7 +426,63 @@ pub(crate) fn run(common: &Args, args: &PullArgs) -> Result<Outcome, Error> {
             title.as_deref(),
             message.as_deref(),
             *delete_branch,
+            match_head.as_deref(),
+            *auto,
         ),
+        PullArgs::Comments { number, paging } => collection(
+            common,
+            *number,
+            &format!("issues/{number}/comments"),
+            paging,
+            "comment",
+        ),
+        PullArgs::Reviews { number, paging } => collection(
+            common,
+            *number,
+            &format!("pulls/{number}/reviews"),
+            paging,
+            "review",
+        ),
+        PullArgs::Files { number, paging } => collection(
+            common,
+            *number,
+            &format!("pulls/{number}/files"),
+            paging,
+            "file",
+        ),
+        PullArgs::ReviewComments {
+            number,
+            review_id,
+            paging,
+        } => collection(
+            common,
+            *number,
+            &format!("pulls/{number}/reviews/{review_id}/comments"),
+            paging,
+            "review_comment",
+        ),
+        PullArgs::Edit { number, edit } => {
+            reject_yes(common, "pr edit")?;
+            let repo = RepoClient::resolve(common)?;
+            let mut plan = super::triage::plan_edit(&repo, *number, edit)?;
+            for request in &mut plan {
+                if request.method == "PATCH"
+                    && request.path == repo.path(&format!("issues/{number}"))
+                {
+                    request.path = repo.path(&format!("pulls/{number}"));
+                }
+            }
+            if common.dry_run {
+                return super::triage::dry_run_plan(&repo, common.json, &plan);
+            }
+            super::triage::execute_plan(&repo, &plan)?;
+            result(common.json, "pr.edit", *number, None)
+        }
+        PullArgs::RequestReview {
+            number,
+            reviewers,
+            teams,
+        } => request_review(common, *number, reviewers, teams),
         PullArgs::Close { number } => edit_state(common, *number, "closed"),
         PullArgs::Reopen { number } => edit_state(common, *number, "open"),
     }
@@ -236,9 +493,16 @@ fn view(common: &Args, number: u64) -> Result<Outcome, Error> {
     let repo = RepoClient::resolve(common)?;
     let path = repo.path(&format!("pulls/{number}"));
     let (value, _) = repo.get::<PullResponse>(&path, "pull request")?;
+    if common.human {
+        return render_human(value);
+    }
     render_one(common.json, value)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "create payload mirrors the CLI options"
+)]
 fn create(
     common: &Args,
     head: &str,
@@ -246,19 +510,21 @@ fn create(
     base: Option<&str>,
     source: Option<&BodySource>,
     draft: bool,
+    metadata: &MetadataArgs,
 ) -> Result<Outcome, Error> {
     reject_yes(common, "pr create")?;
     let body = source.map(read_body).transpose()?;
     // Forgejo 15.0.7 has no draft request field. Its default WIP prefix marks the
     // pull request as a draft during the same create request.
     let draft_title = draft.then(|| format!("WIP: {title}"));
+    let repo = RepoClient::resolve(common)?;
     let payload = CreatePull {
+        metadata: super::triage::resolve_metadata(&repo, metadata)?,
         head,
         title: draft_title.as_deref().unwrap_or(title),
         base,
         body: body.as_deref(),
     };
-    let repo = RepoClient::resolve(common)?;
     let path = repo.path("pulls");
     if common.dry_run {
         return repo.dry_run(common.json, "POST", &path, &payload);
@@ -292,7 +558,24 @@ fn checks(common: &Args, number: u64) -> Result<Outcome, Error> {
     let (pull, _) = repo.get::<PullResponse>(&pull_path, "pull request")?;
     let path = repo.path(&format!("commits/{}/status", encode_path(&pull.head.sha)));
     let combined = collect_statuses(&repo, &path)?;
+    if combined.sha != pull.head.sha {
+        return Err(Error::data(
+            "combined status SHA does not match pull request head",
+        ));
+    }
     let state = normalize_check(&combined.state);
+    if state == "success"
+        && combined.statuses.as_ref().is_none_or(|statuses| {
+            statuses.is_empty()
+                || statuses
+                    .iter()
+                    .any(|status| normalize_check(&status.status) != "success")
+        })
+    {
+        return Err(Error::data(
+            "successful combined status contradicts child statuses",
+        ));
+    }
     let statuses = combined
         .statuses
         .unwrap_or_default()
@@ -432,8 +715,20 @@ fn review(
     number: u64,
     event: ReviewEvent,
     source: Option<&BodySource>,
+    comments_file: Option<&OsStr>,
+    commit: Option<&str>,
 ) -> Result<Outcome, Error> {
     reject_yes(common, "pr review")?;
+    if comments_file == Some(OsStr::new("-"))
+        && matches!(source, Some(BodySource::File(path)) if path == "-")
+    {
+        return Err(Error::usage(
+            "body-file and comments-file cannot both read stdin",
+        ));
+    }
+    let comments = comments_file
+        .map(|path| read_inline_comments(path, commit))
+        .transpose()?;
     let body = source.map(read_body).transpose()?;
     let event = match event {
         ReviewEvent::Approve => "APPROVED",
@@ -441,6 +736,8 @@ fn review(
         ReviewEvent::Comment => "COMMENT",
     };
     let payload = ReviewBody {
+        commit_id: commit,
+        comments,
         event,
         body: body.as_deref(),
     };
@@ -450,9 +747,18 @@ fn review(
         return repo.dry_run(common.json, "POST", &path, &payload);
     }
     let response: ReviewResponse = repo.write("POST", &path, &payload, "pull request review")?;
+    if common.json {
+        return Outcome::json(
+            &serde_json::json!({"kind":"result","action":"pr.review","ok":true,"number":number,"html_url":response.html_url,"id":response.id}),
+        );
+    }
     result(common.json, "pr.review", number, response.html_url)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "merge payload mirrors CLI options"
+)]
 fn merge(
     common: &Args,
     number: u64,
@@ -460,11 +766,15 @@ fn merge(
     title: Option<&str>,
     message: Option<&str>,
     delete_branch: bool,
+    match_head: Option<&str>,
+    auto: bool,
 ) -> Result<Outcome, Error> {
     if !common.yes {
         return Err(Error::safety("pull request merge requires --yes"));
     }
     let payload = MergeBody {
+        head_commit_id: match_head,
+        merge_when_checks_succeed: auto,
         style,
         title,
         message,
@@ -523,6 +833,44 @@ fn render_list(json: bool, values: Vec<PullResponse>) -> Result<Outcome, Error> 
         }
         Ok(Outcome::text(text))
     }
+}
+
+fn render_human(value: PullResponse) -> Result<Outcome, Error> {
+    let record = PullRecord::try_from(value)?;
+    let labels = record
+        .labels
+        .iter()
+        .filter_map(|label| label["name"].as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let assignees = record
+        .assignees
+        .iter()
+        .filter_map(|user| user["login"].as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(Outcome::text(format!(
+        "#{} {}\nState: {}\nAuthor: {}\nBase: {}\nHead: {} ({})\nMerged: {}\nLabels: {}\nMilestone: {}\nAssignees: {}\nURL: {}\n\n{}\n",
+        record.number,
+        plain_field(&record.title),
+        record.state,
+        plain_field(&record.author),
+        plain_field(&record.base),
+        plain_field(&record.head),
+        plain_field(&record.head_sha),
+        record.merged,
+        plain_field(&labels),
+        plain_field(
+            record
+                .milestone
+                .as_ref()
+                .and_then(|m| m["title"].as_str())
+                .unwrap_or("")
+        ),
+        plain_field(&assignees),
+        plain_field(&record.html_url),
+        crate::output::human_text(&record.body)
+    )))
 }
 
 fn render_one(json: bool, value: PullResponse) -> Result<Outcome, Error> {

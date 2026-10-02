@@ -426,3 +426,42 @@ fn collections_paginate_without_partial_output_and_escape_plain_body() {
     assert!(output.stdout.is_empty());
     handle.join().unwrap();
 }
+
+#[test]
+fn comments_all_collects_pages_and_later_failure_emits_nothing() {
+    for fail in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let worker = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for page in 1..=2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                requests.push(request(&mut stream));
+                let body = format!("[{{\"id\":{page},\"body\":\"page {page}\"}}]");
+                let status = if fail && page == 2 {
+                    "500 Error"
+                } else {
+                    "200 OK"
+                };
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nX-Total-Count: 2\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            requests
+        });
+        let output = run(
+            &host,
+            &["pr", "comments", "8", "--all", "--limit", "1", "--json"],
+            None,
+        );
+        if fail {
+            assert!(!output.status.success());
+            assert!(output.stdout.is_empty());
+        } else {
+            assert!(output.status.success());
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(value[1]["id"], 2);
+        }
+        let requests = worker.join().unwrap();
+        assert!(requests[0].contains("page=1&limit=1"));
+        assert!(requests[1].contains("page=2&limit=1"));
+    }
+}

@@ -1,9 +1,10 @@
 # Release maintenance
 
-The source version is 0.2.0. This repository does not currently publish binary
-assets automatically or publish to crates.io (`publish = false`). GitHub CI
-checks the project on Ubuntu 24.04, not native Windows or macOS. Packaging and
-publication helpers are tooling, not evidence of a published release.
+The source version is 0.2.1. GitHub binary releases are published manually;
+this repository does not publish assets automatically or publish to crates.io
+(`publish = false`). GitHub CI checks the project on Ubuntu 24.04, not native
+Windows or macOS. Packaging helpers are tooling, not evidence that a particular
+release or platform was tested or published.
 
 ## Prepare a version
 
@@ -27,10 +28,10 @@ not the current directory or checkout name. `RELEASE_WORKSPACE_ROOT` is a
 legacy fixture override that expects a parent directory containing `fjx/`;
 leave it unset for ordinary standalone use.
 
-Tags use `fjx/vVERSION`, for example `fjx/v0.2.0`. Validate a proposed tag with:
+Tags use `fjx/vVERSION`, for example `fjx/v0.2.1`. Validate a proposed tag with:
 
 ```sh
-nu --no-config-file scripts/release.nu validate-tag fjx/v0.2.0
+nu --no-config-file scripts/release.nu validate-tag fjx/v0.2.1
 ```
 
 Do not push tags or publish assets until the intended remote and release process
@@ -68,7 +69,7 @@ Verification checks inventory, checksums, archive entries, executable modes,
 and binary formats:
 
 ```sh
-nu --no-config-file scripts/package-release.nu verify ./release-assets 0.2.0
+nu --no-config-file scripts/package-release.nu verify ./release-assets 0.2.1
 ```
 
 These operations require GNU coreutils, `tar`, `gzip`, `zip`, `unzip`, and `file`.
@@ -79,7 +80,46 @@ Wine. macOS gets static Mach-O validation only. None of these is native Windows
 or macOS runtime CI, and the normal GitHub check workflow does not run this
 full release-build/smoke pipeline.
 
-## Publication is Forgejo-specific
+## Publish manually on GitHub
+
+Use the authenticated GitHub CLI for `DaltonAlley/fjx`. The Forgejo publication
+helpers below are not compatible with GitHub. Before publication:
+
+1. Commit the prepared version and documentation, merge or push it to `main`,
+   and wait for CI on that exact commit to pass.
+2. Build all six targets from that commit, using its Unix commit timestamp as
+   `--source-date-epoch`, and run the inventory and checksum verification above.
+   Record actual runtime checks in the release notes without claiming native
+   Windows or macOS coverage from the Linux CI job.
+3. Review `git remote get-url origin`, `gh auth status`, and
+   `gh repo view --json nameWithOwner,url`. Validate the tag against the prepared
+   version and make sure neither the tag nor release already exists.
+4. Write release notes outside the source tree and create a draft containing
+   all six archives and their six `.sha256` files. For example, from the checked
+   release commit:
+
+   ```sh
+   git tag -a fjx/v0.2.1 -m "fjx v0.2.1"
+   git push origin refs/tags/fjx/v0.2.1
+   gh release create fjx/v0.2.1 --repo DaltonAlley/fjx --verify-tag --draft \
+     --title "fjx v0.2.1" --notes-file ../release-notes.md ../release-assets/*
+   gh release view fjx/v0.2.1 --repo DaltonAlley/fjx
+   ```
+
+5. Check that the remote tag points to the intended commit and download the
+   draft assets to a fresh directory. Run `package-release.nu verify` on that
+   directory before publishing:
+
+   ```sh
+   gh release edit fjx/v0.2.1 --repo DaltonAlley/fjx --draft=false --latest
+   ```
+
+Verify the published release and its asset inventory once more. If a write
+returns an ambiguous result, inspect remote state before deciding whether any
+repair is needed. Never overwrite an existing release tag or retry a write
+blindly. These manual steps do not add automatic publication to CI.
+
+## Forgejo-specific publication helpers
 
 The inherited `publish-plan`, `push-tag`, `upload-missing-assets`, and
 `verify-final` commands use Forgejo API and authentication semantics. They

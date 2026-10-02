@@ -1,6 +1,6 @@
 # fjx
 
-`fjx` is a small synchronous Forgejo client for people and scripts. Version 0.2.0 targets Forgejo 15.0.7.
+`fjx` is a small synchronous Forgejo client for people and scripts. Version 0.2.1 targets Forgejo 15.0.7.
 Manage issues, pull requests, action runs, and releases from your terminal, with
 stable plain output and compact JSON for automation.
 
@@ -16,9 +16,11 @@ fjx --version
 ```
 
 Make sure Cargo's binary directory, normally `$HOME/.cargo/bin`, is on `PATH`.
-The crate has `publish = false`: crates.io installation and published binary
-assets are not currently provided. To build without installing, run
-`cargo build --locked --release` and use `target/release/fjx` (`fjx.exe` on Windows).
+The crate has `publish = false`, so it is not published to crates.io. Binary
+archives and SHA-256 checksums are available from
+[GitHub Releases](https://github.com/DaltonAlley/fjx/releases). To build without
+installing, run `cargo build --locked --release` and use `target/release/fjx`
+(`fjx.exe` on Windows).
 
 ## Quickstart
 
@@ -116,8 +118,9 @@ nu --no-config-file scripts/check.nu
 This runs Cargo format, Clippy, tests, and docs, plus the repository and release
 Nushell tests and version validation. The standalone GitHub CI runs on Ubuntu
 24.04; it does not provide native Windows or macOS testing or publish binary
-releases. The packaging scripts support six target formats, but that is not a
-claim of published assets or platform runtime coverage.
+releases automatically. Releases are published manually with verified archives
+and checksums. The packaging scripts support six target formats, but that is
+not a claim of native platform runtime coverage.
 
 See [release maintenance](docs/releasing.md) for version preparation, packaging,
 and the distinction between local tooling and automated publication.

@@ -78,7 +78,7 @@ fn collection(
     let mut records = Vec::new();
     let mut text = String::new();
     for value in values {
-        let record = if kind == "file" {
+        let mut record = if kind == "file" {
             let filename = value
                 .get("filename")
                 .and_then(serde_json::Value::as_str)
@@ -92,6 +92,32 @@ fn collection(
                 .ok_or_else(|| Error::data("review or comment has no stable ID"))?;
             serde_json::json!({"kind":kind,"number":number,"id":id,"body":value.get("body"),"author":value.pointer("/user/login"),"state":value.get("state"),"html_url":value.get("html_url"),"created_at":value.get("created_at"),"updated_at":value.get("updated_at"),"commit_id":value.get("commit_id"),"path":value.get("path"),"old_position":value.get("original_position"),"new_position":value.get("position"),"pull_request_review_id":value.get("pull_request_review_id")})
         };
+        if kind == "review" {
+            for key in [
+                "created_at",
+                "updated_at",
+                "path",
+                "old_position",
+                "new_position",
+                "pull_request_review_id",
+            ] {
+                record.as_object_mut().map(|object| object.remove(key));
+            }
+            for key in ["submitted_at", "dismissed", "stale", "comments_count"] {
+                record[key] = value.get(key).cloned().unwrap_or(serde_json::Value::Null);
+            }
+        } else if kind == "comment" {
+            for key in [
+                "state",
+                "commit_id",
+                "path",
+                "old_position",
+                "new_position",
+                "pull_request_review_id",
+            ] {
+                record.as_object_mut().map(|object| object.remove(key));
+            }
+        }
         writeln!(
             &mut text,
             "{}\t{}\t{}",
@@ -156,10 +182,10 @@ struct PullResponse {
     merged_at: Option<String>,
     merge_commit_sha: Option<String>,
     #[serde(default)]
-    labels: Vec<serde_json::Value>,
+    labels: Option<Vec<serde_json::Value>>,
     milestone: Option<serde_json::Value>,
     #[serde(default)]
-    assignees: Vec<serde_json::Value>,
+    assignees: Option<Vec<serde_json::Value>>,
     number: u64,
     title: String,
     body: String,
@@ -179,9 +205,9 @@ struct PullRecord {
     merged: bool,
     merged_at: Option<String>,
     merge_commit_sha: Option<String>,
-    labels: Vec<serde_json::Value>,
+    labels: Vec<String>,
     milestone: Option<serde_json::Value>,
-    assignees: Vec<serde_json::Value>,
+    assignees: Vec<String>,
     kind: &'static str,
     number: u64,
     title: String,
@@ -215,9 +241,21 @@ impl TryFrom<PullResponse> for PullRecord {
             merged: value.merged,
             merged_at: value.merged_at,
             merge_commit_sha: value.merge_commit_sha,
-            labels: value.labels,
-            milestone: value.milestone,
-            assignees: value.assignees,
+            labels: value
+                .labels
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|v| v["name"].as_str().map(str::to_owned))
+                .collect(),
+            milestone: value
+                .milestone
+                .map(|v| serde_json::json!({"id":v["id"],"title":v["title"]})),
+            assignees: value
+                .assignees
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|v| v["login"].as_str().map(str::to_owned))
+                .collect(),
             kind: "pull_request",
             number: value.number,
             title: value.title,
@@ -260,6 +298,7 @@ struct CommentBody<'a> {
 
 #[derive(Deserialize)]
 struct CommentResponse {
+    id: Option<u64>,
     html_url: Option<String>,
 }
 
@@ -364,7 +403,15 @@ pub(crate) fn run(common: &Args, args: &PullArgs) -> Result<Outcome, Error> {
             let milestone =
                 super::triage::resolve_milestone(&repo, filters.milestone.as_deref(), None)?;
             for (key, value) in [
-                ("poster", filters.author.clone()),
+                (
+                    "poster",
+                    super::triage::resolve_assignees(
+                        &repo,
+                        &filters.author.iter().cloned().collect::<Vec<_>>(),
+                    )?
+                    .first()
+                    .cloned(),
+                ),
                 ("milestone", milestone.map(|id| id.to_string())),
                 ("sort", filters.sort.clone()),
             ] {
@@ -707,6 +754,11 @@ fn comment(common: &Args, number: u64, source: &BodySource) -> Result<Outcome, E
         return repo.dry_run(common.json, "POST", &path, &payload);
     }
     let response: CommentResponse = repo.write("POST", &path, &payload, "pull request comment")?;
+    if common.json {
+        return Outcome::json(
+            &serde_json::json!({"kind":"result","action":"pr.comment","ok":true,"number":number,"html_url":response.html_url,"id":response.id}),
+        );
+    }
     result(common.json, "pr.comment", number, response.html_url)
 }
 
@@ -837,18 +889,8 @@ fn render_list(json: bool, values: Vec<PullResponse>) -> Result<Outcome, Error> 
 
 fn render_human(value: PullResponse) -> Result<Outcome, Error> {
     let record = PullRecord::try_from(value)?;
-    let labels = record
-        .labels
-        .iter()
-        .filter_map(|label| label["name"].as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let assignees = record
-        .assignees
-        .iter()
-        .filter_map(|user| user["login"].as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let labels = record.labels.join(", ");
+    let assignees = record.assignees.join(", ");
     Ok(Outcome::text(format!(
         "#{} {}\nState: {}\nAuthor: {}\nBase: {}\nHead: {} ({})\nMerged: {}\nLabels: {}\nMilestone: {}\nAssignees: {}\nURL: {}\n\n{}\n",
         record.number,

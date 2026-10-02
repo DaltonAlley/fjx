@@ -296,6 +296,35 @@ fn pull() -> serde_json::Value {
 }
 
 #[test]
+fn nullable_metadata_current_author_and_review_summaries() {
+    let mut value = pull();
+    value["labels"] = serde_json::Value::Null;
+    value["assignees"] = serde_json::Value::Null;
+    let (host, handle) = server(vec![value.to_string()]);
+    let output = run(&host, &["pr", "view", "8", "--json"], None);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["labels"], serde_json::json!([]));
+    assert_eq!(value["assignees"], serde_json::json!([]));
+    handle.join().unwrap();
+    let (host, handle) = server(vec![r#"{"login":"alice"}"#.into(), "[]".into()]);
+    let output = run(&host, &["pr", "list", "--author", "@me"], None);
+    assert!(output.status.success());
+    let requests = handle.join().unwrap();
+    assert!(requests[0].starts_with("GET /api/v1/user "));
+    assert!(requests[1].contains("poster=alice"));
+    let (host, handle) = server(vec![r#"[{"id":5,"submitted_at":"2026-10-02T00:00:00Z","dismissed":false,"stale":true,"comments_count":3}]"#.into()]);
+    let output = run(&host, &["pr", "reviews", "8", "--json"], None);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value[0]["submitted_at"], "2026-10-02T00:00:00Z");
+    assert_eq!(value[0]["stale"], true);
+    assert_eq!(value[0]["comments_count"], 3);
+    assert!(value[0].get("created_at").is_none());
+    handle.join().unwrap();
+}
+
+#[test]
 fn human_view_preserves_lines_and_escapes_terminal_controls() {
     let mut value = pull();
     value["body"] = serde_json::json!("first\nsecond\u{1b}[31m");

@@ -11,6 +11,29 @@ mod error;
 use args::{Command, IssueArgs, PullArgs, RunArgs};
 use std::ffi::OsString;
 
+#[test]
+fn cli_usage_errors_hint_at_the_nearest_known_command() {
+    for (words, hint) in [
+        (vec!["issue", "view"], "run fjx issue view --help"),
+        (vec!["issue", "frob"], "run fjx issue --help"),
+        (vec!["issue"], "run fjx issue --help"),
+        (
+            vec!["pr", "review-comments", "1"],
+            "run fjx pr review-comments --help",
+        ),
+        (vec!["unknown"], "run fjx --help"),
+    ] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_fjx"))
+            .args(&words)
+            .output()
+            .expect("run local CLI");
+        assert_eq!(output.status.code(), Some(2), "{words:?}");
+        assert!(output.stdout.is_empty(), "{words:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(hint), "{words:?}: {stderr}");
+    }
+}
+
 fn parse(words: &[&str]) -> Result<args::Args, error::Error> {
     args::parse_from(words.iter().map(OsString::from))
 }

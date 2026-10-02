@@ -859,9 +859,26 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
             input: o.input.take(),
             paginate: std::mem::take(&mut o.paginate),
         })),
-        _ => Err(Error::usage(
-            "unknown or incomplete command; run fjx --help",
-        )),
+        _ => {
+            let mut hint = String::from("fjx");
+            if let Some(group) = words
+                .first()
+                .filter(|group| !subcommands(group).is_empty() || *group == "api")
+            {
+                hint.push(' ');
+                hint.push_str(group);
+                if let Some(action) = words
+                    .get(1)
+                    .filter(|action| subcommands(group).contains(&action.as_str()))
+                {
+                    hint.push(' ');
+                    hint.push_str(action);
+                }
+            }
+            Err(Error::usage(format!(
+                "unknown or incomplete command; run {hint} --help"
+            )))
+        }
     }
 }
 

@@ -30,6 +30,7 @@ fjx auth login --host https://forgejo.example
 fjx auth status --json
 fjx repo view -R owner/repo
 fjx issue list -R owner/repo --all --json
+# Create report.md with the issue description before previewing the request.
 fjx issue create -R owner/repo --title "Bug" --body-file report.md --dry-run
 ```
 

@@ -9,7 +9,8 @@ use case before investing in a large implementation.
 
 Use Rust 1.97.1 from `rust-toolchain.toml` and Nushell 0.112.2. Run commands from
 the repository root. Linux tests need Git, Bash, and `script` from util-linux.
-Release tests also use GNU coreutils, `tar`, `gzip`, `zip`, `unzip`, and `file`.
+Release tests also use GNU coreutils, `tar`, `gzip`, `zip`, and `unzip`.
+Real release-asset verification additionally needs `file`.
 The normal checks do not require a live Forgejo account or release credentials.
 
 ```sh

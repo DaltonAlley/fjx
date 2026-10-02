@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a reproducible problem with fjx.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security concerns, follow SECURITY.md instead of posting details here.
+        Remove tokens, authorization headers, private URLs, and config contents.
+  - type: input
+    id: version
+    attributes:
+      label: fjx version or commit
+      description: Output of fjx --version, plus the commit if built from source.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and Forgejo version
+      placeholder: "Linux x86_64, Forgejo 15.0.7"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal command and sanitized inputs. Use example hosts and fake credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized stdout, stderr, and the exit code when relevant.
+    validations:
+      required: true

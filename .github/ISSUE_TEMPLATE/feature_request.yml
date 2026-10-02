@@ -1,0 +1,28 @@
+name: Feature request
+description: Explain a use case or propose an improvement.
+title: "feature: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        fjx aims to stay a small synchronous client with stable scriptable output.
+        Discuss substantial changes before implementing them. Do not include secrets.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what prevents it today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Show example commands or output if helpful, including write-safety behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Could an existing command, fjx api, or a shell script solve this?

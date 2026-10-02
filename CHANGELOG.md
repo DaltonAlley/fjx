@@ -6,6 +6,19 @@ current source version.
 
 ## Unreleased
 
+### Added
+
+- Read-only GitHub CI and a shared `scripts/check.nu` command for Cargo,
+  repository, and release checks.
+- Weekly dependency-update proposals, issue forms, and a pull-request checklist.
+- MIT license text matching the existing package license, security and conduct
+  policies, and consistent editor and line-ending settings.
+
+### Fixed
+
+- Release scripts now locate the standalone checkout without depending on its
+  directory name or an absent parent workspace. Fixture overrides remain supported.
+
 ### Documentation
 
 - Added source installation and a hidden-token quickstart.

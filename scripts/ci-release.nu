@@ -42,5 +42,5 @@ def "main build-package-smoke" [version: string, source_date_epoch: string, --ru
 }
 
 def main [] {
-  fail "usage: fjx/scripts/ci-release.nu build-package-smoke VERSION SOURCE_DATE_EPOCH [--runtime RUNTIME]"
+  fail "usage: scripts/ci-release.nu build-package-smoke VERSION SOURCE_DATE_EPOCH [--runtime RUNTIME]"
 }

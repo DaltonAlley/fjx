@@ -5,6 +5,10 @@ edition = "2024"
 publish = false
 description = "A small, stable Forgejo command-line client"
 license = "MIT"
+repository = "https://github.com/DaltonAlley/fjx"
+readme = "README.md"
+keywords = ["forgejo", "cli", "git", "automation"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 lexopt = "=0.3.1"

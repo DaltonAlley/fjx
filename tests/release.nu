@@ -11,8 +11,6 @@ const ci_release_script = path self ../scripts/ci-release.nu
 const release_toml = path self ../release.toml
 const release_targets = path self ../release-targets.toml
 const release_containerfile = path self ../packaging/release.Containerfile
-const release_workflow = path self ../../.forgejo/workflows/fjx.yml
-const publish_workflow = path self ../../.forgejo/workflows/fjx-release.yml
 
 def check [condition: bool, message: string] {
   if not $condition { error make {msg: $"release test: ($message)"} }
@@ -45,6 +43,31 @@ def assert-versions [root: path, version: string] {
   let validated = (run-release $root [validate])
   check ($validated.exit_code == 0) $validated.stderr
   check (($validated.stdout | str trim) == $version) $"expected version ($version)"
+}
+
+def test-standalone-root [] {
+  let root = (fixture)
+  let project = ($root | path join fjx)
+  let standalone = ($root | path join renamed-checkout)
+  mv $project $standalone
+  let scripts = ($standalone | path join scripts)
+  mkdir $scripts
+  cp $release_script $scripts
+  # Run outside the checkout and with no parent/fjx directory. An empty
+  # override must behave like an unset override, not resolve relative to cwd.
+  let validated = with-env {RELEASE_WORKSPACE_ROOT: ''} {
+    do { cd $root; ^nu --no-config-file ($scripts | path join release.nu) validate } | complete
+  }
+  check ($validated.exit_code == 0) $validated.stderr
+  check (($validated.stdout | str trim) == '1.2.3') "standalone checkout version is wrong"
+  let prepared = with-env {RELEASE_WORKSPACE_ROOT: ''} {
+    do { cd $root; ^nu --no-config-file ($scripts | path join release.nu) prepare patch } | complete
+  }
+  check ($prepared.exit_code == 0) $prepared.stderr
+  for file in [release.toml Cargo.toml Cargo.lock] {
+    check ((open --raw ($standalone | path join $file)) | str contains 'version = "1.2.4"') $"standalone prepare did not update ($file)"
+  }
+  rm -rf $root
 }
 
 def test-version-validation-and-tags [] {
@@ -523,47 +546,8 @@ def test-release-build-contract [] {
   check ($package_script_text | str contains "const linux_amd64_smoke_image = 'docker.io/library/debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171'") "AMD64 Linux smoke image is not digest-pinned"
   check ($package_script_text | str contains "const linux_arm64_smoke_image = 'docker.io/library/debian:bookworm-slim@sha256:6bd27d44e6c32a66bbd72d7cb2b76a8ae3497ec2e5274a81abd1b37f6013fa1f'") "ARM64 Linux smoke image is not digest-pinned"
 
-  let check_workflow = (open --raw $release_workflow)
-  let publish_workflow_text = (open --raw $publish_workflow)
-  let workflow = [$check_workflow $publish_workflow_text] | str join "\n"
-  let parsed = (open $release_workflow)
-  let publish_parsed = (open $publish_workflow)
-  check ($parsed.concurrency | get "cancel-in-progress") "check workflow does not cancel superseded work"
-  check (($publish_parsed.concurrency | get "cancel-in-progress") == false) "release workflow may cancel publication"
-  check (not ($workflow | str contains 'DOCKER_BUILD_SUMMARY')) "direct Buildx workflow retains an action-only summary flag"
-  check (not ($workflow | str contains 'DOCKER_BUILD_RECORD_UPLOAD')) "direct Buildx workflow retains an action-only record flag"
-
-  check (($parsed.jobs | columns) == [check]) "project workflow must contain only its check job"
-  check (($publish_parsed.jobs | columns) == [publish]) "release workflow must contain only its publish job"
-  let check_job = $parsed.jobs.check
-  check ($check_job.name == 'Check') "check has the wrong display name"
-  check ($check_job.runs-on == 'ci-node-22') "pull-request check does not use the CI runner"
-  check ($check_job.container | str contains '@sha256:') "check container is not digest pinned"
-  check (($parsed | get on | columns) == [pull_request workflow_dispatch]) "check workflow has unexpected triggers"
-  let check_text = $check_job | to yaml
-  check ($check_text | str contains 'scripts/check.nu fjx') "check workflow does not run the project gate"
-  check (not ($check_text | str contains 'build-package-smoke')) "pull request still builds release assets"
-  check (not ($check_text | str contains 'release-node-22')) "pull request can select the release runner"
-  check (not ($check_text | str contains 'FORGEJO_TOKEN')) "pull-request check has a Forgejo token context"
-  let publish = $publish_parsed.jobs.publish
-  check (($publish.needs? | default null) == null) "publish unexpectedly depends on a pull-request job"
-  check (($publish_parsed | get on | columns) == [workflow_dispatch]) "release workflow is not manual"
-  check ($publish.steps.0.name == 'Require main') "release does not reject non-main refs first"
-  check ($publish.steps.0.run | str contains 'refs/heads/main') "release main-ref guard is missing"
-  check ($publish.runs-on == 'release-node-22') "release does not use the release runner"
-  let publish_checkout = $publish.steps | where name == 'Check out exact main revision without credentials' | first
-  check ($publish_checkout.env.EXPECTED_REVISION == '${{ forgejo.sha }}') "publish checkout does not select the triggering main revision"
-  check ($publish_checkout.run | str contains 'git fetch --depth=1 origin "$EXPECTED_REVISION"') "publish checkout is not an exact unauthenticated fetch"
-  check ($publish_checkout.run | str contains 'test "$(git rev-parse HEAD)" = "$EXPECTED_REVISION"') "publish checkout does not verify the fetched revision"
-  let publish_text = $publish_workflow_text | split row "\n  publish:\n" | last
-  check ($publish_text | str contains 'title: fjx (${{ steps.release.outputs.version }})') "Forgejo action title does not match the driver metadata contract"
-  check (($publish_text | split row 'fjx/scripts/release.nu push-tag $env.RELEASE_TAG $env.FORGEJO_SHA' | length) == 2) "publish does not delegate the tag push exactly once"
-  for bypass in ['http.extraHeader' ' push origin '] {
-    check (not ($publish_text | str contains $bypass)) $"publish bypasses the release tag driver through: ($bypass)"
-  }
-
-  let driver_call = 'fjx/scripts/ci-release.nu build-package-smoke'
-  check (($workflow | split row $driver_call | length) == 2) "release does not call the package driver exactly once"
+  # Workflow policy belongs to the standalone repository's CI tests. Keep
+  # release tests focused on the local packaging and publication contracts.
   let driver = (open --raw $ci_release_script)
   for required in [
     'package-release.nu) build $asset_dir --runtime $runtime --source-date-epoch'
@@ -581,15 +565,6 @@ def test-release-build-contract [] {
   for required in ['def "main push-tag"' '^git remote get-url origin' 'http.followRedirects=false' 'git cat-file -t' 'Forgejo token is required to push a release tag' 'def "main upload-missing-assets"' 'def "main verify-final"' 'must be greater than prior released version' 'browser_download_url' 'releases/assets/($asset_id)' "--proto '=https' --max-redirs 0" 'cmp --silent' 'does not match the locally checked output' 'draft: false' 'prerelease: false'] {
     check ($release_driver | str contains $required) $"release publication boundary lacks: ($required)"
   }
-  check ($workflow | str contains 'Upload only missing release assets') "publish cannot resume missing asset uploads"
-  check ($workflow | str contains 'Verify final publication state') "publish lacks final Forgejo verification"
-  check ($publish_workflow_text | str contains 'scripts/ci.nu verify-runner --docker') "release does not verify Docker"
-  check ($publish_workflow_text | str contains 'scripts/ci.nu verify-runner --docker --buildx') "release does not verify Buildx"
-  check ($publish_workflow_text | str contains 'docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f') "release lacks pinned Buildx setup"
-  check ($publish_workflow_text | str contains 'version: https://github.com/docker/buildx.git#bac71def78b077ee6a2607119f88e291861b18ac') "release lacks the exact Buildx source commit"
-  check (not ($workflow | str contains 'docker/setup-qemu-action@')) "fjx release depends on host binfmt emulation instead of its explicit build-platform emulator"
-  check (not ($workflow | str contains 'docker/build-push-action@')) "fjx still uses the Forgejo-incompatible Buildx action"
-
   let version = (open --raw $release_toml | from toml | get version)
   let wrong_version = (do { ^nu --no-config-file $ci_release_script build-package-smoke 0.0.0 123 } | complete)
   check ($wrong_version.exit_code != 0) "release driver accepted the wrong version"
@@ -626,6 +601,7 @@ def test-ci-build-arguments [] {
   rm -rf $root
 }
 
+test-standalone-root
 test-version-validation-and-tags
 test-dry-run-and-success
 test-prepare-rollbacks

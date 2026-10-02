@@ -1,2 +1,12 @@
 /target/
 
+# Local release output and CI bootstrap files.
+/dist/
+/publish-assets/
+/release-assets/
+/.act-setup-nu-runtime/
+
+# Local credentials must not be committed.
+.env
+.env.*
+!.env.example

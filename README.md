@@ -1,11 +1,61 @@
 # fjx
 
 `fjx` is a small synchronous Forgejo client for people and scripts. Version 0.2.0 targets Forgejo 15.0.7.
+Manage issues, pull requests, action runs, and releases from your terminal, with
+stable plain output and compact JSON for automation.
+
+## Install from source
+
+Install Git and Rust 1.97.1, pinned in [rust-toolchain.toml](rust-toolchain.toml).
+
+```sh
+git clone https://github.com/DaltonAlley/fjx.git
+cd fjx
+cargo install --path . --locked
+fjx --version
+```
+
+Make sure Cargo's binary directory, normally `$HOME/.cargo/bin`, is on `PATH`.
+The crate has `publish = false`: crates.io installation and published binary
+assets are not currently provided. To build without installing, run
+`cargo build --locked --release` and use `target/release/fjx` (`fjx.exe` on Windows).
+
+## Quickstart
+
+On Unix, create a token on your Forgejo server with permissions for your commands,
+then enter it at the hidden prompt:
+
+```sh
+fjx auth login --host https://forgejo.example
+fjx auth status --json
+fjx repo view -R owner/repo
+fjx issue list -R owner/repo --all --json
+# Create report.md with the issue description before previewing the request.
+fjx issue create -R owner/repo --title "Bug" --body-file report.md --dry-run
+```
+
+The last command previews a request. Remove `--dry-run` only when you intend to
+create the issue. Optionally run `fjx auth setup-git --host https://forgejo.example`
+to share the saved login with Git and `jj git push`.
+
+For automation, supply `FJX_TOKEN` or `FORGEJO_TOKEN` through your environment's
+secret mechanism. `auth login --with-token` reads one trimmed line from stdin,
+but avoid typing tokens into `echo` commands, shell history, or command arguments.
+Windows uses environment tokens rather than saved logins.
+
+## Documentation
+
+- [Command examples](#command-examples), [configuration and safety](#configuration-and-safety), and [output contracts](#output-contracts)
+- [Architecture](docs/architecture.md) and [release maintenance](docs/releasing.md)
+- [MIT license](LICENSE)
+- [Repository maintenance and settings](docs/repository-maintenance.md)
+
+## Command examples
 
 The first three commands below show the Unix saved-login workflow. On Windows, set `FJX_TOKEN` or `FORGEJO_TOKEN` instead.
 
 ```text
-fjx auth login --host https://forgejo.example --with-token
+fjx auth login --host https://forgejo.example
 fjx auth status --json
 fjx auth setup-git --host https://forgejo.example
 fjx repo view -R owner/repo
@@ -29,6 +79,8 @@ fjx api /version --json
 fjx api /repos/owner/repo/issues --paginate --json
 ```
 
+## Configuration and safety
+
 Common flags may go before or after command words: `--host URL`, `-R OWNER/REPO`, `--json`, `--dry-run`, and `--yes`. `FJX_HOST`, `FJX_REPO`, `FJX_TOKEN`, and `FORGEJO_TOKEN` provide non-interactive context. On Unix, `FJX_CONFIG` selects the token store.
 
 On Unix, `auth login` takes a token from a hidden prompt. Pass `--with-token` to read one trimmed line from stdin. `auth setup-git` installs a host-scoped Git credential helper so Git and `jj git push` can use the same saved login. Unix token files use mode 0600.
@@ -47,29 +99,25 @@ Every typed write accepts `--dry-run`, which validates local inputs and prints t
 
 `pr checks` exits 1 unless all normalized checks succeed. `run watch` buffers output until the run ends: it emits one final record, exits 0 only for success, and exits 1 for every other conclusion. A timeout or poll error leaves stdout empty.
 
+## Output contracts
+
 Plain output is stable and short. Each tab separates fields and each line feed ends a record. Within server-provided fields, backslash, tab, carriage return, and line feed encode as `\\`, `\t`, `\r`, and `\n`; every other Unicode control scalar encodes as `\u{HEX}` with uppercase hex and no leading zeroes. This encoding is reversible, so text that looks like an escape starts with `\\`. `--json` emits one compact JSON value with the original field values and no plain-output encoding. Errors go to stderr and leave stdout empty. See `fjx --help` for exit classes.
 
-## Release
+## Development and releases
 
-`nu --no-config-file scripts/release.nu validate` checks the three version declarations. `nu --no-config-file scripts/release.nu prepare [--dry-run] patch|minor|major` updates them as one transaction. `nu --no-config-file scripts/package-release.nu OUTPUT_DIR [TARGET]` builds one target or all six published targets and writes an archive plus `.sha256` for each:
+Use Rust 1.97.1 from `rust-toolchain.toml` and Nushell 0.112.2. Linux tests
+also require Git, Bash, `script` (util-linux), GNU coreutils, `tar`, `gzip`,
+`zip`, and `unzip`. Run the same checks as CI from the repository root:
 
-- `x86_64-unknown-linux-gnu` (`tar.gz`)
-- `aarch64-unknown-linux-gnu` (`tar.gz`)
-- `x86_64-unknown-linux-musl` (`tar.gz`)
-- `aarch64-unknown-linux-musl` (`tar.gz`)
-- `aarch64-apple-darwin` (`tar.gz`)
-- `x86_64-pc-windows-gnu` (`zip`, containing `fjx.exe`)
+```sh
+nu --no-config-file scripts/check.nu
+```
 
-Set `FJX_PACKAGE_BIN_ROOT` to a directory containing target-named subdirectories with `fjx` (`fjx.exe` for Windows) to package prebuilt files. Otherwise the script uses `podman` (or `FJX_CONTAINER_RUNTIME`) with `packaging/release.Containerfile`.
+This runs Cargo format, Clippy, tests, and docs, plus the repository and release
+Nushell tests and version validation. The standalone GitHub CI runs on Ubuntu
+24.04; it does not provide native Windows or macOS testing or publish binary
+releases. The packaging scripts support six target formats, but that is not a
+claim of published assets or platform runtime coverage.
 
-Release verification checks the complete asset inventory, checksums, archive contents, executable bits where applicable, and binary formats. CI smoke-runs x86-64 Linux in a container and ARM64 Linux with a pinned static QEMU interpreter inside an ARM64 container root filesystem, without relying on host `binfmt_misc`; it runs the Windows build under Wine. The macOS ARM64 artifact receives static Mach-O format validation only; CI does not run it on macOS hardware. These checks do not claim native Windows or macOS runtime coverage.
-
-Release scripts require Nushell 0.112.2 and should always run with
-`--no-config-file`. The Forgejo workflow installs Nu from the official
-digest-pinned container action
-`docker://ghcr.io/nushell/nushell@sha256:cda9491fdc5b7a74d713340c198c9c53b23431a0e6671f7c06809edb76a43b2c`.
-It copies the runtime into `.act-setup-nu-runtime`, verifies version `0.112.2`,
-and sets each repository script step shell to
-`./.act-setup-nu-runtime/nu --no-config-file {0}`. The trusted pull-request
-final gate is intentionally different: it has exactly two inline runner-shell
-steps and uses no checkout, action, repository code, or Nu runtime.
+See [release maintenance](docs/releasing.md) for version preparation, packaging,
+and the distinction between local tooling and automated publication.

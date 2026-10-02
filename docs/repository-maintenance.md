@@ -36,21 +36,3 @@ from GitHub CI; see [releasing](releasing.md).
 Repository checks parse the workflow, check local Markdown links, and guard
 CI permissions and package invariants. They do not replace a real GitHub
 Actions run or a complete Markdown renderer.
-
-## Owner setup
-
-These settings require action in GitHub after pushing and observing CI:
-
-- [ ] Enable Actions and verify that its default token permissions are read-only.
-- [ ] Require the `Rust and Nushell checks` status on `main` and block force
-  pushes and deletion. Review the bypass policy. Mandatory second-person
-  approval can lock out a sole maintainer.
-- [ ] Set a short repository description and relevant topics such as `forgejo`,
-  `rust`, and `cli`.
-- [ ] Decide where release assets will be published and validate each promised
-  platform before offering downloads. The current CI checks source and release
-  logic but does not run the six-target packaging pipeline.
-
-This setup does not automatically push tags, publish releases, or merge updates.
-It does not claim native Windows/macOS coverage or change the single-binary
-Rust runtime dependency policy.

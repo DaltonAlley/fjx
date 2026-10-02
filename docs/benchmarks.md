@@ -72,7 +72,10 @@ an extra `jq` process or script that selects the label ID from the metadata.
 
 Measured on October 2, 2026, on Linux x86_64, AMD Ryzen 5 7600X,
 with Rust/Cargo 1.97.1 and optimized release binaries. The baseline is commit
-`25cff9f`. Updated sources were at commit `3a110f8` when built.
+`25cff9f`. The updated binary used the complete runtime source subsequently
+committed as `c2506b1`. At build time HEAD was `3a110f8`, with those integration
+changes still uncommitted. A release rebuild after `c2506b1` produced the same
+binary SHA-256 shown below.
 The JSON report, including all individual samples, was written to
 `/home/dalton/.jcode/scratch/fjx-ab/report.json`.
 

@@ -18,8 +18,9 @@ nu --no-config-file scripts/release.nu prepare patch
 Use `minor` or `major` instead of `patch` when appropriate. The preparation
 script updates `release.toml`, `Cargo.toml`, and the `fjx` package entry in
 `Cargo.lock` as a transaction with rollback on failure. Do not edit just one
-version declaration. Update [CHANGELOG.md](../CHANGELOG.md), inspect the diff,
-and run all [contributor checks](../CONTRIBUTING.md) before committing.
+version declaration. Inspect the diff, update user-facing documentation when
+needed, and run the [project checks](../README.md#development-and-releases)
+before committing.
 
 The release script finds the standalone repository root from its own location,
 not the current directory or checkout name. `RELEASE_WORKSPACE_ROOT` is a

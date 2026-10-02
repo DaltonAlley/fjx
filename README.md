@@ -46,10 +46,8 @@ Windows uses environment tokens rather than saved logins.
 ## Documentation
 
 - [Command examples](#command-examples), [configuration and safety](#configuration-and-safety), and [output contracts](#output-contracts)
-- [Contributing](CONTRIBUTING.md) and [architecture](docs/architecture.md)
-- [Support and troubleshooting](SUPPORT.md)
-- [Changelog](CHANGELOG.md) and [release maintenance](docs/releasing.md)
-- [Security reporting](SECURITY.md), [code of conduct](CODE_OF_CONDUCT.md), and [MIT license](LICENSE)
+- [Architecture](docs/architecture.md) and [release maintenance](docs/releasing.md)
+- [MIT license](LICENSE)
 - [Repository maintenance and settings](docs/repository-maintenance.md)
 
 ## Command examples
@@ -107,11 +105,19 @@ Plain output is stable and short. Each tab separates fields and each line feed e
 
 ## Development and releases
 
-The standalone GitHub CI runs the Cargo and Nushell checks in
-[CONTRIBUTING.md](CONTRIBUTING.md) on Ubuntu 24.04, using Rust 1.97.1 and
-Nushell 0.112.2. It does not provide native Windows or macOS testing or publish
-binary releases. The packaging scripts support six target formats, but that is
-not a claim of published assets or platform runtime coverage.
+Use Rust 1.97.1 from `rust-toolchain.toml` and Nushell 0.112.2. Linux tests
+also require Git, Bash, `script` (util-linux), GNU coreutils, `tar`, `gzip`,
+`zip`, and `unzip`. Run the same checks as CI from the repository root:
+
+```sh
+nu --no-config-file scripts/check.nu
+```
+
+This runs Cargo format, Clippy, tests, and docs, plus the repository and release
+Nushell tests and version validation. The standalone GitHub CI runs on Ubuntu
+24.04; it does not provide native Windows or macOS testing or publish binary
+releases. The packaging scripts support six target formats, but that is not a
+claim of published assets or platform runtime coverage.
 
 See [release maintenance](docs/releasing.md) for version preparation, packaging,
 and the distinction between local tooling and automated publication.

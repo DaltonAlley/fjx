@@ -8,7 +8,7 @@ List the checks run and their results. Explain any checks you could not run.
 
 - [ ] Ran `nu --no-config-file scripts/check.nu`.
 - [ ] Added regression tests for behavior changes, or explained why none are needed.
-- [ ] Updated user-facing documentation and `CHANGELOG.md` when applicable.
+- [ ] Updated user-facing documentation when applicable.
 - [ ] Kept secrets out of code, fixtures, logs, and this description.
 
 ## Compatibility and safety

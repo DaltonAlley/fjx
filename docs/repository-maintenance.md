@@ -1,75 +1,56 @@
 # Repository maintenance
 
-This guide records why the repository is organized this way and what still needs
-owner configuration. The goal is a useful, verifiable small project, not a large
-collection of badges or bots.
+FJX keeps repository setup small: a useful README, license, repeatable checks,
+and release instructions. The files below record the research behind those
+choices and the settings that cannot be enabled by a commit.
 
 ## Research and decisions
 
-Reviewed on October 2, 2026. These are examples to learn from, not policies copied
-wholesale or endorsements by the upstream projects.
+Reviewed October 2, 2026.
 
-| Source | Useful pattern | Application in fjx |
-| --- | --- | --- |
-| [GitHub community profiles](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/about-community-profiles-for-public-repositories) | Make project purpose, licensing, contribution expectations, and support discoverable. | Root README, MIT license text matching the existing Cargo declaration, contribution, support, conduct, and security files. |
-| [ripgrep README](https://github.com/BurntSushi/ripgrep/blob/master/README.md) | Explain what the CLI does, how to install it, and how to build it. | A short introduction and reproducible source-install instructions, without claiming a crates.io package or existing binary releases. |
-| [bat contributor guide](https://github.com/sharkdp/bat/blob/master/CONTRIBUTING.md) | Discuss substantial features first, add regression tests, and record user-visible changes. | Contributor guide, focused PR checklist, and an honest changelog without invented release history. |
-| [fd repository](https://github.com/sharkdp/fd) | Offer README navigation and examples, with separate contributor, changelog, and security documents. | User-facing entry points separated from architecture and release details. |
-| [GitHub Actions security guidance](https://docs.github.com/en/actions/reference/security/secure-use) | Minimize token permissions, pin action revisions, and keep untrusted PR code out of privileged workflows. | Read-only CI, SHA-pinned checkout without persisted credentials, checksum-verified Nu, and no publishing secrets. |
-| [Dependabot configuration](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference) | Keep dependency updates visible and reviewable. | Weekly Cargo and Actions update proposals with a small open-PR limit, not automatic merges. |
+| Source | Practice applied to fjx |
+| --- | --- |
+| [GitHub community profiles](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/about-community-profiles-for-public-repositories) | Make the purpose, license, and build path easy to find in the root README and LICENSE. Not every optional community file is useful for this repository. |
+| [ripgrep](https://github.com/BurntSushi/ripgrep/blob/master/README.md) and [fd](https://github.com/sharkdp/fd) | Show installation and working examples before implementation details; link to focused architecture and release notes. |
+| [GitHub Actions guidance](https://docs.github.com/en/actions/reference/security/secure-use) | Run checks with read-only permissions, a commit-pinned checkout action, no persisted credentials, and a checksum-verified Nushell download. |
+| [Dependabot configuration](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference) | Propose weekly Cargo and Actions updates for review, without automatic merging. |
 
-The existing release scripts and tests were imported from a larger workspace.
-The standalone repository now resolves its own root instead of requiring a
-parent `fjx/` directory. Tests for missing parent Forgejo workflows were replaced
-with local checks. Provider-specific Forgejo publication helpers remain separate
-from GitHub CI. See [releasing](releasing.md) before using them.
+The release scripts came from a larger workspace. They now resolve the
+standalone repository root, and tests no longer assert the presence of missing
+parent Forgejo workflows. Forgejo-specific publication helpers are separate
+from GitHub CI; see [releasing](releasing.md).
 
-## Checks and maintenance
+## Routine checks
 
 - Run `nu --no-config-file scripts/check.nu` before merging. CI runs the same
-  entry point on Linux for pull requests, pushes to `main`, and manual requests.
+  entry point on Linux for pull requests, pushes to `main`, and manual runs.
 - Keep `rust-toolchain.toml`, the release container's Rust toolchain, and the
-  contributor prerequisites aligned when upgrading Rust.
+  README's build prerequisites aligned when upgrading Rust.
 - When updating Nushell, review its release notes, verify the archive checksum
-  against the upstream release, and update CI, the check script, and docs together.
-- Review Dependabot PRs normally. Preserve the runtime dependency allowlist and
-  exact version pins. Review both manifest and lockfile changes, then run checks.
-- Container-image digests and the inline Nu archive checksum are reviewed
-  manually. The current Dependabot config does not update those pins.
-- Keep a changelog entry for user-visible behavior changes. Do not change the
-  release version just to update repository documentation.
+  against upstream, and update CI, the check script, and README together.
+- Review Dependabot proposals and keep the runtime dependency allowlist and
+  exact pins. Review manifest and lockfile changes together, then run checks.
+- Review pinned container images and the Nu archive checksum manually; the
+  current Dependabot configuration does not update those pins.
 
-Repository checks parse the workflow and issue forms, check local Markdown file
-links, and guard important CI permissions and package invariants. They are not
-a replacement for an actual GitHub Actions run or a complete Markdown renderer.
+Repository checks parse the workflow, check local Markdown links, and guard
+CI permissions and package invariants. They do not replace a real GitHub
+Actions run or a complete Markdown renderer.
 
-## Owner setup checklist
+## Owner setup
 
-These settings are not enabled by committing files. Confirm them in GitHub after
-pushing and observing the first successful workflow run:
+These settings require action in GitHub after pushing and observing CI:
 
-- [ ] Enable Actions for this repository and review the default token permissions.
-  Keep the workflow token read-only and do not allow it to approve PRs.
-- [ ] Add a rule for `main` requiring the `Rust and Nushell checks` status check
-  and resolved conversations. Block force pushes and deletion. Review the bypass
-  policy explicitly. Requiring approval from another person is useful once there
-  is another active reviewer, but can lock a sole maintainer out of their own PRs.
-- [ ] [Enable private vulnerability reporting](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository).
-  Verify the report button is available, then keep `SECURITY.md` accurate.
-- [ ] Review dependency-graph, Dependabot alert, and secret-scanning settings
-  available to the repository. Notifications must reach someone who can act on them.
+- [ ] Enable Actions and verify that its default token permissions are read-only.
+- [ ] Require the `Rust and Nushell checks` status on `main` and block force
+  pushes and deletion. Review the bypass policy. Mandatory second-person
+  approval can lock out a sole maintainer.
 - [ ] Set a short repository description and relevant topics such as `forgejo`,
-  `rust`, `cli`, and `automation`.
-- [ ] Choose and publish a private moderation contact if one becomes available.
-- [ ] Before offering downloadable releases, decide where they are published and
-  validate every promised platform. The current CI checks source and release
-  logic, not a six-platform binary publication pipeline.
+  `rust`, and `cli`.
+- [ ] Decide where release assets will be published and validate each promised
+  platform before offering downloads. The current CI checks source and release
+  logic but does not run the six-target packaging pipeline.
 
-## Deliberately not added
-
-- No automatic release, tag push, crates.io publication, or dependency auto-merge.
-- No invented security mailbox, response SLA, coverage percentage, or support matrix.
-- No native Windows/macOS claim based on Linux tests or static artifact checks.
-- No extra runtime dependency, public Rust library, asynchronous runtime, or
-  project-wide build system just to support repository administration.
-- No stale-issue bot, funding links, or mandatory approval by a fictitious team.
+This setup does not automatically push tags, publish releases, or merge updates.
+It does not claim native Windows/macOS coverage or change the single-binary
+Rust runtime dependency policy.

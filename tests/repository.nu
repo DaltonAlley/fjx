@@ -59,23 +59,6 @@ def test-ci-contract [] {
   }
 }
 
-def test-issue-forms [] {
-  for file in [bug_report.yml feature_request.yml] {
-    let form = open ('.github/ISSUE_TEMPLATE' | path join $file)
-    check (($form.name | is-not-empty) and ($form.description | is-not-empty)) $"($file) needs a name and description"
-    let fields = $form.body | where type != markdown
-    let ids = $fields | get id
-    check (($ids | uniq | length) == ($ids | length)) $"($file) has duplicate field IDs"
-    check ($fields | any {|field| $field.validations.required? | default false }) $"($file) must request required reproduction or use-case information"
-    for field in $fields {
-      check ($field.attributes.label | is-not-empty) $"($file) has an unlabeled input"
-    }
-  }
-  let config = open .github/ISSUE_TEMPLATE/config.yml
-  check $config.blank_issues_enabled 'keep a general help and private-channel request route open'
-  check ($config.contact_links | any {|link| $link.url | str ends-with '/SECURITY.md' }) 'route security reports to the security policy'
-}
-
 def test-documentation-links [] {
   let files = glob '*.md' | append (glob 'docs/**/*.md') | append (glob '.github/*.md')
   for file in $files {
@@ -96,7 +79,6 @@ def main [] {
   cd $project_dir
   test-package-contract
   test-ci-contract
-  test-issue-forms
   test-documentation-links
   print 'repository checks passed'
 }

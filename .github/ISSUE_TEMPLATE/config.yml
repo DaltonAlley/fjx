@@ -1,8 +1,0 @@
-blank_issues_enabled: true
-contact_links:
-  - name: Usage and troubleshooting
-    url: https://github.com/DaltonAlley/fjx/blob/main/SUPPORT.md
-    about: Start here for help, then open an issue if needed.
-  - name: Security reporting
-    url: https://github.com/DaltonAlley/fjx/blob/main/SECURITY.md
-    about: Read the private reporting instructions before sharing vulnerability details.

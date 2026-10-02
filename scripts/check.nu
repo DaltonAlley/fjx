@@ -20,7 +20,7 @@ def main [] {
   hide-env --ignore-errors RELEASE_WORKSPACE_ROOT
   for program in [cargo git bash script tar gzip zip unzip sha256sum mktemp] {
     if (which --all $program | where type == external | is-empty) {
-      error make {msg: $"missing test prerequisite: ($program); see CONTRIBUTING.md"}
+      error make {msg: $"missing test prerequisite: ($program); see README.md"}
     }
   }
 

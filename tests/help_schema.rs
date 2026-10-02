@@ -181,6 +181,77 @@ fn projection_uses_typed_metadata_and_rejects_raw_commands() {
 }
 
 #[test]
+fn structured_arguments_expose_requirements_without_parsing_usage() {
+    let create = schema(&["issue", "create"]);
+    assert_eq!(
+        create["commands"][0]["required_flags"],
+        serde_json::json!(["--title"])
+    );
+    assert_eq!(create["commands"][0]["positionals"], serde_json::json!([]));
+    assert!(text(&["issue", "create"]).contains("Required flags: --title"));
+    let review = schema(&["pr", "review"]);
+    assert_eq!(
+        review["commands"][0]["required_flags"],
+        serde_json::json!(["--event"])
+    );
+    assert_eq!(
+        review["commands"][0]["enum_values"]["--event"],
+        serde_json::json!(["approve", "request-changes", "comment"])
+    );
+    assert_eq!(
+        review["commands"][0]["positionals"],
+        serde_json::json!([{ "name": "number", "required": true }])
+    );
+    let merge = schema(&["pr", "merge"]);
+    assert_eq!(
+        merge["commands"][0]["required_flags"],
+        serde_json::json!(["--yes"])
+    );
+    assert_eq!(
+        merge["commands"][0]["enum_values"]["--style"],
+        serde_json::json!(["merge", "rebase", "rebase-merge", "squash"])
+    );
+    for group in [
+        "issue",
+        "pr",
+        "run",
+        "release",
+        "label",
+        "milestone",
+        "branch",
+    ] {
+        assert_eq!(
+            schema(&[group, "list"])["commands"][0]["required_flags"],
+            serde_json::json!([])
+        );
+    }
+    let comment = schema(&["issue", "comment"]);
+    assert_eq!(
+        comment["commands"][0]["required_flags"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        comment["commands"][0]["required_one_of"],
+        serde_json::json!([["--body", "--body-file"]])
+    );
+    assert_eq!(
+        schema(&["pr", "review-comments"])["commands"][0]["positionals"],
+        serde_json::json!([{ "name": "number", "required": true }, { "name": "review_id", "required": true }])
+    );
+    let issue = help::output_fields_for("issue", "view").unwrap_or_default();
+    assert!(issue.contains(&"milestone"));
+    let reviews = help::output_fields_for("pr", "reviews").unwrap_or_default();
+    assert!(reviews.contains(&"submitted_at"));
+    assert!(!reviews.contains(&"path"));
+    assert!(!reviews.contains(&"created_at"));
+    assert!(
+        help::output_fields_for("pr", "comment")
+            .unwrap_or_default()
+            .contains(&"id")
+    );
+}
+
+#[test]
 fn command_help_and_schema_skip_context_stdin_and_network() {
     for words in [
         &["help", "issue", "create"][..],

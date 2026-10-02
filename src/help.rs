@@ -14,6 +14,7 @@ const ISSUE: &[&str] = &[
     "state",
     "labels",
     "assignees",
+    "milestone",
     "created_at",
     "updated_at",
 ];
@@ -97,6 +98,30 @@ const COMMENT: &[&str] = &[
     "updated_at",
 ];
 const RESULT_ID: &[&str] = &["kind", "action", "ok", "number", "html_url", "id"];
+const PR_DISCUSSION: &[&str] = &[
+    "kind",
+    "number",
+    "id",
+    "body",
+    "author",
+    "html_url",
+    "created_at",
+    "updated_at",
+];
+const PR_REVIEW: &[&str] = &[
+    "kind",
+    "number",
+    "id",
+    "body",
+    "author",
+    "state",
+    "html_url",
+    "commit_id",
+    "submitted_at",
+    "dismissed",
+    "stale",
+    "comments_count",
+];
 const PR_COMMENT: &[&str] = &[
     "kind",
     "number",
@@ -155,6 +180,181 @@ struct SchemaCommand {
     #[serde(flatten)]
     metadata: &'static CommandMeta,
     flags: Vec<&'static str>,
+    #[serde(flatten)]
+    arguments: ArgumentMetadata,
+}
+
+#[derive(Serialize)]
+struct Positional {
+    name: &'static str,
+    required: bool,
+}
+
+#[derive(Default, Serialize)]
+struct ArgumentMetadata {
+    required_flags: &'static [&'static str],
+    positionals: Vec<Positional>,
+    enum_values: std::collections::BTreeMap<&'static str, &'static [&'static str]>,
+    mutually_exclusive: Vec<&'static [&'static str]>,
+    required_one_of: Vec<&'static [&'static str]>,
+    constraints: Vec<&'static str>,
+}
+
+impl CommandMeta {
+    fn arguments(&self) -> ArgumentMetadata {
+        let mut arguments = ArgumentMetadata {
+            required_flags: match self.name {
+                "issue create" | "milestone create" => &["--title"],
+                "pr create" => &["--head", "--title"],
+                "pr review" => &["--event"],
+                "pr merge" | "branch delete" => &["--yes"],
+                "release create" => &["--tag", "--title"],
+                "label create" => &["--name", "--color"],
+                "workflow dispatch" => &["--ref"],
+                "schema" => &["--json"],
+                _ => &[],
+            },
+            ..ArgumentMetadata::default()
+        };
+        let names: &[&str] = match self.name {
+            "auth git-credential" => &["operation"],
+            "issue view" | "issue comments" | "issue comment" | "issue edit" | "issue close"
+            | "issue reopen" | "pr view" | "pr comments" | "pr comment" | "pr edit"
+            | "pr close" | "pr reopen" | "pr reviews" | "pr files" | "pr request-review"
+            | "pr diff" | "pr checks" | "pr review" | "pr merge" => &["number"],
+            "pr review-comments" => &["number", "review_id"],
+            "run view" | "run watch" => &["id"],
+            "release view" => &["tag"],
+            "release upload" => &["release_id", "path"],
+            "branch delete" => &["name"],
+            "workflow dispatch" => &["file"],
+            "api" => &["path"],
+            "help" | "schema" => &["command", "action"],
+            _ => &[],
+        };
+        arguments.positionals = names
+            .iter()
+            .map(|name| Positional {
+                name,
+                required: !matches!(self.name, "help" | "schema"),
+            })
+            .collect();
+        match self.name {
+            "issue list" | "pr list" | "milestone list" => {
+                arguments
+                    .enum_values
+                    .insert("--state", &["open", "closed", "all"]);
+            }
+            "pr review" => {
+                arguments
+                    .enum_values
+                    .insert("--event", &["approve", "request-changes", "comment"]);
+            }
+            "pr merge" => {
+                arguments
+                    .enum_values
+                    .insert("--style", &["merge", "rebase", "rebase-merge", "squash"]);
+            }
+            "api" => {
+                arguments
+                    .enum_values
+                    .insert("-X", &["GET", "POST", "PUT", "PATCH", "DELETE"]);
+            }
+            "auth git-credential" => {
+                arguments
+                    .enum_values
+                    .insert("operation", &["get", "store", "erase"]);
+            }
+            _ => {}
+        }
+        self.argument_constraints(&mut arguments);
+        arguments
+    }
+
+    fn argument_constraints(&self, arguments: &mut ArgumentMetadata) {
+        arguments.mutually_exclusive.push(&["--human", "--json"]);
+        arguments
+            .constraints
+            .push("--fields requires --json; --human is only valid for issue view and pr view");
+        if self.flags.contains(&PAGING) {
+            arguments.mutually_exclusive.push(&["--page", "--all"]);
+        }
+        if self.flags.contains(&BODY) || self.flags.contains(&EDIT) {
+            arguments
+                .mutually_exclusive
+                .push(&["--body", "--body-file"]);
+        }
+        if self.flags.contains(&METADATA) || self.flags.contains(&EDIT) {
+            arguments
+                .mutually_exclusive
+                .push(&["--milestone", "--milestone-id"]);
+        }
+        if self.flags.contains(&EDIT) {
+            arguments.mutually_exclusive.push(&[
+                "--milestone",
+                "--milestone-id",
+                "--clear-milestone",
+            ]);
+            arguments.required_one_of.push(&[
+                "--title",
+                "--body",
+                "--body-file",
+                "--add-label",
+                "--remove-label",
+                "--add-label-id",
+                "--remove-label-id",
+                "--add-assignee",
+                "--remove-assignee",
+                "--milestone",
+                "--milestone-id",
+                "--clear-milestone",
+            ]);
+            if self.name == "pr edit" {
+                arguments.required_one_of[0] = &[
+                    "--title",
+                    "--body",
+                    "--body-file",
+                    "--base",
+                    "--add-label",
+                    "--remove-label",
+                    "--add-label-id",
+                    "--remove-label-id",
+                    "--add-assignee",
+                    "--remove-assignee",
+                    "--milestone",
+                    "--milestone-id",
+                    "--clear-milestone",
+                ];
+            }
+            arguments
+                .constraints
+                .push("cannot add and remove the same label, label ID, or assignee");
+        }
+        match self.name {
+            "issue comment" | "pr comment" => {
+                arguments.required_one_of.push(&["--body", "--body-file"]);
+            }
+            "pr request-review" => arguments.required_one_of.push(&["--reviewer", "--team"]),
+            "pr review" => {
+                arguments
+                    .constraints
+                    .push("--comments-file requires --commit");
+                arguments.constraints.push("--event request-changes or comment requires one of --body, --body-file, --comments-file");
+            }
+            "api" => {
+                arguments
+                    .constraints
+                    .push("DELETE requires --yes; --yes is only valid for DELETE");
+                arguments
+                    .constraints
+                    .push("--paginate requires GET; --dry-run requires a write method");
+            }
+            "issue list" | "pr list" => arguments
+                .constraints
+                .push("--sort is forwarded to Forgejo; accepted values depend on the server"),
+            _ => {}
+        }
+    }
 }
 
 macro_rules! command {
@@ -352,7 +552,7 @@ static COMMANDS: &[CommandMeta] = &[
         "fjx pr comments NUMBER",
         [PAGING],
         "fjx pr comments 12 --all --json",
-        PR_COMMENT,
+        PR_DISCUSSION,
         false,
         false
     ),
@@ -361,7 +561,7 @@ static COMMANDS: &[CommandMeta] = &[
         "fjx pr reviews NUMBER",
         [PAGING],
         "fjx pr reviews 12 --json",
-        PR_COMMENT,
+        PR_REVIEW,
         false,
         false
     ),
@@ -425,7 +625,7 @@ static COMMANDS: &[CommandMeta] = &[
         "fjx pr comment NUMBER (--body TEXT | --body-file PATH|-)",
         [BODY],
         "fjx pr comment 12 --body 'Looks good'",
-        RESULT,
+        RESULT_ID,
         true,
         false
     ),
@@ -716,6 +916,24 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
     } else if commands.len() == 1 && !(path.len() == 1 && GROUPS.contains(&path[0].as_str())) {
         let command = commands[0];
         writeln!(text, "Usage: {}", command.usage).map_err(format_error)?;
+        let arguments = command.arguments();
+        if !arguments.required_flags.is_empty() {
+            writeln!(
+                text,
+                "Required flags: {}",
+                arguments.required_flags.join(", ")
+            )
+            .map_err(format_error)?;
+        }
+        if matches!(
+            command.name,
+            "issue comment" | "pr comment" | "pr request-review"
+        ) {
+            for alternatives in arguments.required_one_of {
+                writeln!(text, "Requires one of: {}", alternatives.join(", "))
+                    .map_err(format_error)?;
+            }
+        }
         for flag in command.flags() {
             writeln!(text, "  {flag}").map_err(format_error)?;
         }
@@ -769,6 +987,7 @@ pub(crate) fn schema(path: &[String]) -> Result<Outcome, Error> {
             .into_iter()
             .map(|metadata| SchemaCommand {
                 flags: metadata.flags(),
+                arguments: metadata.arguments(),
                 metadata,
             })
             .collect(),

@@ -147,33 +147,44 @@ fn malformed_inline_comments_are_rejected_before_network() {
 
 #[test]
 fn inline_review_requires_commit_and_single_stdin() {
-    for args in [
-        vec![
-            "pr",
-            "review",
-            "8",
-            "--event",
-            "comment",
-            "--comments-file",
-            "-",
-        ],
-        vec![
-            "pr",
-            "review",
-            "8",
-            "--event",
-            "comment",
-            "--comments-file",
-            "-",
-            "--body-file",
-            "-",
-            "--commit",
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        ],
+    for (args, diagnostic) in [
+        (
+            vec![
+                "pr",
+                "review",
+                "8",
+                "--event",
+                "comment",
+                "--comments-file",
+                "-",
+            ],
+            "--comments-file requires --commit",
+        ),
+        (
+            vec![
+                "pr",
+                "review",
+                "8",
+                "--event",
+                "comment",
+                "--comments-file",
+                "-",
+                "--body-file",
+                "-",
+                "--commit",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ],
+            "body-file and comments-file cannot both read stdin",
+        ),
     ] {
-        let output = run("http://127.0.0.1:1", &args, Some("[]"));
-        assert!(!output.status.success());
+        // Argument validation exits before reading stdin, so do not race it with a write.
+        let output = run("http://127.0.0.1:1", &args, None);
+        assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            format!("fjx: {diagnostic}\n")
+        );
     }
 }
 

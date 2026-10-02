@@ -8,9 +8,12 @@ def fail [message: string] {
 }
 
 def project-dir [] {
-  let source_root = ($script_dir | path dirname | path dirname)
-  let workspace_root = ($env.RELEASE_WORKSPACE_ROOT? | default $source_root)
-  $workspace_root | path join $project_name
+  # Explicit workspace overrides retain the historical parent/fjx fixture layout.
+  let workspace_root = $env.RELEASE_WORKSPACE_ROOT? | default ''
+  if ($workspace_root | is-not-empty) {
+    return ($workspace_root | path join $project_name)
+  }
+  $script_dir | path dirname
 }
 
 def valid-version [version: string] {
@@ -39,25 +42,25 @@ def read-version-file [path: path, label: string] {
 }
 
 export def release-version [] {
-  read-version-file ((project-dir) | path join release.toml) "fjx/release.toml"
+  read-version-file ((project-dir) | path join release.toml) "release.toml"
 }
 
 def package-version [] {
   let path = ((project-dir) | path join Cargo.toml)
-  if not ($path | path exists) { fail "missing fjx/Cargo.toml" }
-  let value = try { (open --raw $path | from toml).package.version } catch { fail "invalid version in fjx/Cargo.toml" }
-  checked-version $value "fjx/Cargo.toml"
+  if not ($path | path exists) { fail "missing Cargo.toml" }
+  let value = try { (open --raw $path | from toml).package.version } catch { fail "invalid version in Cargo.toml" }
+  checked-version $value "Cargo.toml"
 }
 
 def lock-version [] {
   let path = ((project-dir) | path join Cargo.lock)
-  if not ($path | path exists) { fail "missing fjx/Cargo.lock" }
-  let packages = try { (open --raw $path | from toml).package } catch { fail "invalid fjx version in fjx/Cargo.lock" }
+  if not ($path | path exists) { fail "missing Cargo.lock" }
+  let packages = try { (open --raw $path | from toml).package } catch { fail "invalid fjx version in Cargo.lock" }
   let matches = ($packages | where name == $project_name)
-  if ($matches | length) != 1 { fail "invalid fjx version in fjx/Cargo.lock" }
+  if ($matches | length) != 1 { fail "invalid fjx version in Cargo.lock" }
   let value = ($matches | first | get version)
   if (($value | describe) != 'string') or not (valid-version $value) {
-    fail "invalid fjx version in fjx/Cargo.lock"
+    fail "invalid fjx version in Cargo.lock"
   }
   $value
 }
@@ -278,9 +281,9 @@ def inspect-remote-tags [tag: string, revision: string, version: string] {
 
 def release-targets [] {
   let path = ((project-dir) | path join release-targets.toml)
-  let manifest = try { open --raw $path | from toml } catch { fail "invalid fjx/release-targets.toml" }
+  let manifest = try { open --raw $path | from toml } catch { fail "invalid release-targets.toml" }
   if $manifest.schema != 1 or ($manifest.targets | length) != 6 {
-    fail "fjx/release-targets.toml must declare schema 1 and exactly six targets"
+    fail "release-targets.toml must declare schema 1 and exactly six targets"
   }
   $manifest.targets
 }
@@ -444,5 +447,5 @@ def "main verify-final" [version: string, revision: string, tag: string] {
 }
 
 def main [] {
-  fail "usage: fjx/scripts/release.nu (version|validate|validate-tag TAG|prepare [--dry-run] BUMP|publish-plan REVISION EPOCH OUTPUT|push-tag TAG REVISION|upload-missing-assets RELEASE_ID NAMES|verify-final VERSION REVISION TAG)"
+  fail "usage: scripts/release.nu (version|validate|validate-tag TAG|prepare [--dry-run] BUMP|publish-plan REVISION EPOCH OUTPUT|push-tag TAG REVISION|upload-missing-assets RELEASE_ID NAMES|verify-final VERSION REVISION TAG)"
 }

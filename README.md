@@ -48,6 +48,8 @@ Windows uses environment tokens rather than saved logins.
 ## Documentation
 
 - [Command examples](#command-examples), [configuration and safety](#configuration-and-safety), and [output contracts](#output-contracts)
+- [Issue and PR workflows](docs/cli-workflows.md), including selective output, triage, and inline reviews
+- [Reproducible CLI benchmarks](docs/benchmarks.md)
 - [Architecture](docs/architecture.md) and [release maintenance](docs/releasing.md)
 - [MIT license](LICENSE)
 - [Repository maintenance and settings](docs/repository-maintenance.md)
@@ -61,7 +63,13 @@ fjx auth login --host https://forgejo.example
 fjx auth status --json
 fjx auth setup-git --host https://forgejo.example
 fjx repo view -R owner/repo
-fjx issue list -R owner/repo --all --json
+fjx issue list -R owner/repo --all --json --fields number,title,state
+fjx issue list -R owner/repo --label bug --assignee @me --search timeout
+fjx issue view -R owner/repo 12 --human
+fjx issue comments -R owner/repo 12 --all --json --fields id,author,body
+fjx issue edit -R owner/repo 12 --add-label bug --add-assignee @me --dry-run
+fjx help issue create
+fjx schema pr review --json
 fjx issue create -R owner/repo --title "Bug" --body-file report.md
 fjx pr create -R owner/repo --head feature --title "Change"
 fjx pr checks -R owner/repo 12 --json
@@ -93,15 +101,21 @@ Tokens never appear in command arguments or user-facing output. The client accep
 
 Raw `api` paths sit below the selected host's `/api/v1/` path. They must stay relative. Raw DELETE requires `--yes`. Write requests accept `--dry-run`, which prints the planned request without sending it.
 
-Typed commands cover issue list, view, create, comment, close, and reopen; pull-request list, view, create, diff, checks, comment, review, merge, close, and reopen; action-run list, view, and watch; release list, view, create, and upload; label list and create; milestone list and create; branch list and delete; and workflow dispatch. Lists default to 30 open items where state applies. `--all` follows Forgejo pages up to 1,000 items and fails instead of returning a cut-off list. Forgejo 15.0.7 has no draft field in its create-pull request body, so `pr create --draft` uses its default `WIP:` title prefix in the one create request.
+Typed commands cover issue list, view, create, edit, comments, comment, close, and reopen; pull-request list, view, create, edit, files, comments, reviews, review-comments, request-review, diff, checks, comment, review, merge, close, and reopen; action-run list, view, and watch; release list, view, create, and upload; label list and create; milestone list and create; branch list and delete; and workflow dispatch. Lists default to 30 open items where state applies. `--all` follows Forgejo pages up to 1,000 items and fails instead of returning a cut-off list. Forgejo 15.0.7 has no draft field in its create-pull request body, so `pr create --draft` uses its default `WIP:` title prefix in the one create request.
 
 `release view` identifies a release by tag. `release upload` instead requires the positive numeric Forgejo release ID returned by release list, view, or create; a tag is not accepted in that position. Uploads stream a regular file as `application/octet-stream`, default the asset name to the file name, and let `--name` override it. Workflow dispatch requires a workflow file and ref, accepts repeated unique `--field KEY=VALUE` inputs, and returns the created run ID, run number, and jobs.
 
 Every typed write accepts `--dry-run`, which validates local inputs and prints the planned request without sending it. Pull-request merge, branch delete, and raw DELETE require `--yes`, including for a dry run; other typed writes reject `--yes`. Read commands reject both write-safety flags.
 
-`pr checks` exits 1 unless all normalized checks succeed. `run watch` buffers output until the run ends: it emits one final record, exits 0 only for success, and exits 1 for every other conclusion. A timeout or poll error leaves stdout empty.
+`pr checks` exits 1 unless all normalized checks succeed, and rejects contradictory success statuses or a response SHA different from the requested PR head. `pr merge --match-head SHA --yes` sends a server-side expected-head precondition; `--auto` requests server-side merge when checks succeed. `run watch` buffers output until the run ends: it emits one final record, exits 0 only for success, and exits 1 for every other conclusion. A timeout or poll error leaves stdout empty.
+
+Issue/PR metadata names may need paginated read requests, including during dry-run. Edits validate and resolve the entire plan before writes, but multiple writes are not atomic. A later failure reports completed requests on stderr and leaves stdout empty. Assignee additions/removals use read-modify-write and can race concurrent changes. See [workflow details](docs/cli-workflows.md) before using multi-step edits in automation.
 
 ## Output contracts
+
+`fjx help COMMAND ACTION` and `fjx COMMAND ACTION --help` show focused help without repository or authentication context. `fjx schema COMMAND ACTION --json` exposes versioned command metadata for tooling. Use `--json --fields number,title,state` to select documented top-level fields without changing bare `--json`. Unknown or duplicate fields fail before any request or write. Projection preserves object/array shapes, null values, and exit codes. It reduces stdout, not the server response size. Issue/PR/run list filters execute on the server and are preserved across pages.
+
+`issue view --human` and `pr view --human` show readable multiline bodies and metadata. Existing plain and JSON defaults remain unchanged except for additive JSON metadata fields. Issue and PR JSON include normalized milestone metadata; PR JSON also distinguishes merged from closed and includes label/assignee names. Comment/review write results expose IDs where supplied by the server. Raw `api --json` emits `null` for a successful empty response.
 
 Plain output is stable and short. Each tab separates fields and each line feed ends a record. Within server-provided fields, backslash, tab, carriage return, and line feed encode as `\\`, `\t`, `\r`, and `\n`; every other Unicode control scalar encodes as `\u{HEX}` with uppercase hex and no leading zeroes. This encoding is reversible, so text that looks like an escape starts with `\\`. `--json` emits one compact JSON value with the original field values and no plain-output encoding. Errors go to stderr and leave stdout empty. See `fjx --help` for exit classes.
 

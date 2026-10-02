@@ -811,7 +811,17 @@ fn typed_issue_commands_keep_routes_payloads_and_stable_json() {
         "GET /api/v1/repos/dalton/monolith/issues?state=all&type=issues&page=1&limit=10 HTTP/1.1"
     ));
     assert!(requests[1].starts_with("POST /api/v1/repos/dalton/monolith/issues HTTP/1.1"));
-    assert!(requests[1].ends_with("{\"title\":\"new\",\"body\":\"body\"}"));
+    let create_body: serde_json::Value = serde_json::from_str(
+        requests[1]
+            .split_once("\r\n\r\n")
+            .unwrap_or_else(|| panic!("missing request body"))
+            .1,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        create_body,
+        serde_json::json!({"title":"new","body":"body"})
+    );
 
     let dry = command()
         .args([

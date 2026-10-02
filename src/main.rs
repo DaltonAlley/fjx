@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod context;
 mod error;
+mod help;
 mod host;
 mod http;
 mod output;
@@ -15,7 +16,7 @@ use error::Error;
 use output::Outcome;
 
 fn main() {
-    let result = args::parse().and_then(|args| run(&args));
+    let result = args::parse().and_then(|args| execute(&args));
     match result {
         Ok(outcome) => {
             if let Err(error) = std::io::stdout().lock().write_all(&outcome.bytes) {
@@ -28,6 +29,21 @@ fn main() {
         }
         Err(error) => fail(&error),
     }
+}
+
+fn execute(args: &Args) -> Result<Outcome, Error> {
+    if matches!(args.command, Command::Help { .. }) {
+        return run(args);
+    }
+    // A misspelled projection must not be discovered after a mutation has run.
+    let fields = if args.dry_run {
+        Some(["kind", "method", "url", "body"].as_slice())
+    } else {
+        help::output_fields(&args.command)
+    };
+    output::validate_fields(&args.fields, fields)?;
+    let outcome = run(args)?;
+    output::project(outcome, &args.fields)
 }
 
 fn run(args: &Args) -> Result<Outcome, Error> {
@@ -49,7 +65,8 @@ fn run(args: &Args) -> Result<Outcome, Error> {
         Command::Branch(command) => commands::branch::run(args, command),
         Command::Workflow(command) => commands::workflow::run(args, command),
         Command::Api(api) => commands::api::run(args, api),
-        Command::Help => Ok(Outcome::text(HELP)),
+        Command::Help { path } => help::render(path),
+        Command::Schema { path } => help::schema(path),
         Command::Version => Ok(Outcome::text(concat!(
             "fjx ",
             env!("CARGO_PKG_VERSION"),
@@ -62,62 +79,3 @@ fn fail(error: &Error) -> ! {
     eprintln!("fjx: {error}");
     std::process::exit(i32::from(error.code()));
 }
-
-const HELP: &str = concat!(
-    "fjx ",
-    env!("CARGO_PKG_VERSION"),
-    " - a small Forgejo client
-
-Usage:
-  fjx auth login [--with-token]
-  fjx auth status
-  fjx auth logout
-  fjx auth setup-git
-  fjx repo view
-  fjx issue list [--state open|closed|all] [--page N | --all] [--limit N]
-  fjx issue view NUMBER
-  fjx issue create --title TEXT [--body TEXT | --body-file PATH|-]
-  fjx issue comment NUMBER (--body TEXT | --body-file PATH|-)
-  fjx issue close NUMBER
-  fjx issue reopen NUMBER
-  fjx pr list [--state open|closed|all] [--page N | --all] [--limit N]
-  fjx pr view NUMBER
-  fjx pr create --head REF --title TEXT [--base REF] [--body TEXT | --body-file PATH|-] [--draft]
-  fjx pr diff NUMBER
-  fjx pr checks NUMBER
-  fjx pr comment NUMBER (--body TEXT | --body-file PATH|-)
-  fjx pr review NUMBER --event approve|request-changes|comment [--body TEXT | --body-file PATH|-]
-  fjx pr merge NUMBER [--style merge|rebase|rebase-merge|squash] [--title TEXT] [--message TEXT] [--delete-branch] --yes
-  fjx pr close NUMBER
-  fjx pr reopen NUMBER
-  fjx run list [--page N | --all] [--limit N]
-  fjx run view ID
-  fjx run watch ID [--poll SECONDS] [--wait SECONDS]
-  fjx release list [--page N | --all] [--limit N]
-  fjx release view TAG
-  fjx release create --tag TAG --title TEXT [--body TEXT | --body-file PATH|-] [--target REF] [--draft] [--prerelease]
-  fjx release upload RELEASE_ID PATH [--name NAME]
-  fjx label list [--page N | --all] [--limit N]
-  fjx label create --name TEXT --color HEX [--description TEXT]
-  fjx milestone list [--state open|closed|all] [--page N | --all] [--limit N]
-  fjx milestone create --title TEXT [--description TEXT] [--due RFC3339]
-  fjx branch list [--page N | --all] [--limit N]
-  fjx branch delete NAME --yes
-  fjx workflow dispatch FILE --ref REF [--field KEY=VALUE]...
-  fjx api PATH [-X GET|POST|PUT|PATCH|DELETE] [--input PATH|-] [--paginate]
-
-Common flags:
-  --host URL       Forgejo HTTPS base URL (loopback HTTP is allowed)
-  -R OWNER/REPO    Repository context
-  --json           Emit one compact JSON value
-  --dry-run        Print a Forgejo write without sending it
-  --yes            Confirm pull-request merge or a destructive delete
-  -h, --help       Show this help
-  -V, --version    Show the version
-
-Exit codes:
-  0 success; 1 unsuccessful Forgejo work; 2 usage; 3 context/auth;
-  4 network/TLS/timeout; 5 Forgejo HTTP error; 6 safety refusal;
-  7 incompatible Forgejo data; 8 local file/VCS error; 130 interrupted
-"
-);

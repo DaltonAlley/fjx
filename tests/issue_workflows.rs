@@ -321,6 +321,82 @@ fn label_lookup_follows_all_pages_before_planning() {
 }
 
 #[test]
+fn null_assignees_are_valid_unassigned_issues() {
+    let (output, _) = run(
+        &[
+            "issue",
+            "edit",
+            "12",
+            "--add-assignee",
+            "alice",
+            "--dry-run",
+            "--json",
+        ],
+        vec![(200, json!({"assignees":null}), None)],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value =
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(value[0]["body"]["assignees"], json!(["alice"]));
+}
+
+#[test]
+fn milestone_readback_is_normalized_and_comment_id_is_optional() {
+    let mut value = issue();
+    value["milestone"] = json!({"id":8,"title":"v1","state":"open"});
+    let (output, _) = run(&["issue", "view", "12", "--json"], vec![(200, value, None)]);
+    assert!(output.status.success());
+    let value: Value =
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(value["milestone"], json!({"id":8,"title":"v1"}));
+    let (output, _) = run(
+        &["issue", "comment", "12", "--body", "hello", "--json"],
+        vec![(
+            201,
+            json!({"html_url":"https://example.test/comment"}),
+            None,
+        )],
+    );
+    assert!(output.status.success());
+    let value: Value =
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| panic!("{error}"));
+    assert!(value["id"].is_null());
+}
+
+#[test]
+fn add_and_remove_names_share_one_lookup() {
+    let (output, requests) = run(
+        &[
+            "issue",
+            "edit",
+            "12",
+            "--add-label",
+            "bug",
+            "--remove-label",
+            "old",
+            "--dry-run",
+            "--json",
+        ],
+        vec![(
+            200,
+            json!([{"id":7,"name":"bug"},{"id":8,"name":"old"}]),
+            None,
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].contains("limit=50"));
+}
+
+#[test]
 fn ambiguous_label_prevents_all_writes() {
     let (output, requests) = run(
         &[

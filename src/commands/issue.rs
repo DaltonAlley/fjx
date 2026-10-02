@@ -20,6 +20,12 @@ struct Label {
     name: String,
 }
 
+#[derive(Deserialize, Serialize)]
+struct Milestone {
+    id: u64,
+    title: String,
+}
+
 #[derive(Deserialize)]
 struct IssueResponse {
     number: u64,
@@ -30,6 +36,7 @@ struct IssueResponse {
     state: String,
     labels: Option<Vec<Label>>,
     assignees: Option<Vec<User>>,
+    milestone: Option<Milestone>,
     created_at: String,
     updated_at: String,
 }
@@ -45,6 +52,7 @@ struct IssueRecord {
     state: &'static str,
     labels: Vec<String>,
     assignees: Vec<String>,
+    milestone: Option<Milestone>,
     created_at: String,
     updated_at: String,
 }
@@ -82,6 +90,7 @@ impl TryFrom<IssueResponse> for IssueRecord {
                 .into_iter()
                 .map(|user| user.login)
                 .collect(),
+            milestone: value.milestone,
             created_at: value.created_at,
             updated_at: value.updated_at,
         })
@@ -100,7 +109,7 @@ struct CommentBody<'a> {
 
 #[derive(Deserialize)]
 struct CommentResponse {
-    id: u64,
+    id: Option<u64>,
     html_url: Option<String>,
 }
 
@@ -259,7 +268,7 @@ fn edit_state(common: &Args, number: u64, state: &'static str) -> Result<Outcome
 fn render_human(value: IssueResponse) -> Result<Outcome, Error> {
     let record = IssueRecord::try_from(value)?;
     Ok(Outcome::text(format!(
-        "#{} {}\nState: {}\nAuthor: {}\nURL: {}\nLabels: {}\nAssignees: {}\n\n{}\n",
+        "#{} {}\nState: {}\nAuthor: {}\nURL: {}\nLabels: {}\nAssignees: {}\nMilestone: {}\n\n{}\n",
         record.number,
         plain_field(&record.title),
         record.state,
@@ -267,6 +276,10 @@ fn render_human(value: IssueResponse) -> Result<Outcome, Error> {
         plain_field(&record.html_url),
         plain_field(&record.labels.join(", ")),
         plain_field(&record.assignees.join(", ")),
+        plain_field(&record.milestone.map_or_else(
+            || "none".to_owned(),
+            |milestone| format!("{} ({})", milestone.title, milestone.id)
+        )),
         crate::output::human_text(&record.body)
     )))
 }

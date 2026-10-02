@@ -58,7 +58,7 @@ fn lookup(
         &PageArgs {
             page: 1,
             all: true,
-            limit: 100,
+            limit: 50,
         },
         suffix,
     )?;
@@ -66,7 +66,7 @@ fn lookup(
         let matches: Vec<_> = values.iter().filter(|value| value[field].as_str() == Some(name)).collect();
         match matches.as_slice() {
             [value] => value["id"].as_u64().filter(|id| *id > 0).ok_or_else(|| Error::data(format!("{suffix} entry has invalid ID"))),
-            [] => Err(Error::usage(format!("no applicable {suffix} named {name:?}, use an explicit ID for organization labels"))),
+            [] => Err(Error::usage(if suffix == "labels" { format!("no applicable label named {name:?}, use an explicit ID for organization labels") } else { format!("no milestone named {name:?}") })),
             _ => Err(Error::usage(format!("ambiguous {suffix} name {name:?}, use an explicit ID"))),
         }
     }).collect()
@@ -122,6 +122,24 @@ pub(crate) fn resolve_metadata(repo: &RepoClient, args: &MetadataArgs) -> Result
     Ok(value)
 }
 
+fn edit_labels(repo: &RepoClient, edit: &EditArgs) -> Result<(Vec<u64>, Vec<u64>), Error> {
+    let mut names = edit.add_labels.clone();
+    names.extend(edit.remove_labels.clone());
+    let ids = lookup(repo, "labels", "name", &names)?;
+    let mut add = edit.add_label_ids.clone();
+    let mut remove = edit.remove_label_ids.clone();
+    add.extend(&ids[..edit.add_labels.len()]);
+    remove.extend(&ids[edit.add_labels.len()..]);
+    if add.contains(&0) || remove.contains(&0) {
+        return Err(Error::usage("label IDs must be positive"));
+    }
+    add.sort_unstable();
+    add.dedup();
+    remove.sort_unstable();
+    remove.dedup();
+    Ok((add, remove))
+}
+
 pub(crate) fn plan_edit(
     repo: &RepoClient,
     number: u64,
@@ -130,8 +148,7 @@ pub(crate) fn plan_edit(
     if edit.clear_milestone && (edit.milestone.is_some() || edit.milestone_id.is_some()) {
         return Err(Error::usage("cannot set and clear milestone together"));
     }
-    let add = resolve_labels(repo, &edit.add_labels, &edit.add_label_ids)?;
-    let remove = resolve_labels(repo, &edit.remove_labels, &edit.remove_label_ids)?;
+    let (add, remove) = edit_labels(repo, edit)?;
     if add.iter().any(|id| remove.contains(id)) {
         return Err(Error::usage("cannot add and remove the same label"));
     }
@@ -177,9 +194,15 @@ pub(crate) fn plan_edit(
         }
         let (current, _): (Value, _) =
             repo.get(&repo.path(&format!("issues/{number}")), "issue assignees")?;
-        let mut assignees: Vec<String> = current["assignees"]
-            .as_array()
-            .ok_or_else(|| Error::data("issue assignees are invalid"))?
+        let empty = Vec::new();
+        let current_assignees = if current["assignees"].is_null() {
+            &empty
+        } else {
+            current["assignees"]
+                .as_array()
+                .ok_or_else(|| Error::data("issue assignees are invalid"))?
+        };
+        let mut assignees: Vec<String> = current_assignees
             .iter()
             .map(|user| {
                 user["login"]

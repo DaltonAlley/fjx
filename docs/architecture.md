@@ -10,17 +10,28 @@ boundary prevents partial success output when a request or later page fails.
 | Module | Responsibility |
 | --- | --- |
 | `args` | CLI syntax, command shapes, local argument and safety-flag validation. |
+| `help` | Shared command discovery metadata, scoped help, output field catalogs, and versioned schemas. |
 | `host` | Host URL validation and API URL construction, including loopback HTTP rules. |
 | `repo` | Owner/repository validation and Git/jj remote inference. |
 | `context` | Resolve explicit flags, environment, remotes, saved host, and token source. |
 | `config` | Token validation, Unix private-file checks, persistence, and credential lookup. |
 | `http` | Synchronous authenticated requests, redirect refusal, bounded response reads, and HTTP errors. |
 | `commands` | Typed Forgejo operations, raw API path rules, pagination, and command outcomes. |
-| `output` | Stable plain-field encoding and compact JSON output. |
+| `output` | Stable plain-field encoding, safe multiline human text, compact JSON, and field projection. |
 | `error` | Error categories and exit codes. |
 
-`commands/typed.rs` shares typed-command helpers. Raw API path validation belongs
-to `commands/api.rs`; do not duplicate it in the CLI parser or transport.
+`commands/typed.rs` shares typed-command helpers. `commands/triage.rs` owns
+metadata resolution and planned multi-step issue/PR edits. It resolves the full
+plan before sending writes, preserves unrelated labels, and reports completed
+requests if a later step fails. Assignee replacement is a documented read-modify-
+write race, not an atomic operation. Raw API path validation belongs to
+`commands/api.rs`; do not duplicate it in the CLI parser or transport.
+
+`main` validates requested output field names against the command's discovery
+metadata before command execution. Projection runs only after a complete result
+exists and preserves its exit status. It does not stream pages or turn an error
+into partial success. Schemas and focused help are local-only and do not resolve
+credentials or repository context.
 
 ## Context and authentication
 

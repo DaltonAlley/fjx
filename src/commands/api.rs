@@ -139,6 +139,9 @@ fn paginate(client: &Client, path: &RawPath, compact: bool) -> Result<Outcome, E
 }
 
 fn render_response(bytes: Vec<u8>, compact: bool) -> Result<Outcome, Error> {
+    if bytes.is_empty() && compact {
+        return Outcome::json(&Value::Null);
+    }
     match serde_json::from_slice::<Value>(&bytes) {
         Ok(value) => Outcome::raw_json(&value, compact),
         Err(_) if compact => Err(Error::data("Forgejo response is not valid JSON")),

@@ -4,11 +4,11 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::args::{Args, PageArgs, RunArgs};
+use crate::args::{Args, PageArgs, RunArgs, RunFilters};
 use crate::error::Error;
 use crate::output::{Outcome, plain_field};
 
-use super::typed::{AdvertisedTotal, MAX_ITEMS, RepoClient, reject_read_flags};
+use super::typed::{AdvertisedTotal, MAX_ITEMS, RepoClient, encode_path, reject_read_flags};
 
 #[derive(Deserialize)]
 struct ActionRunResponse {
@@ -78,20 +78,24 @@ impl RunRecord {
 
 pub(crate) fn run(common: &Args, args: &RunArgs) -> Result<Outcome, Error> {
     match args {
-        RunArgs::List { paging } => list(common, paging),
+        RunArgs::List { paging, filters } => list(common, paging, filters),
         RunArgs::View { id } => view(common, *id),
         RunArgs::Watch { id, poll, wait } => watch(common, *id, *poll, *wait),
     }
 }
 
-fn list(common: &Args, paging: &PageArgs) -> Result<Outcome, Error> {
+fn list(common: &Args, paging: &PageArgs, filters: &RunFilters) -> Result<Outcome, Error> {
     reject_read_flags(common, "run list")?;
     let repo = RepoClient::resolve(common)?;
     let mut values = Vec::new();
     let mut page = paging.page;
     let mut total = AdvertisedTotal::default();
+    let query = filter_query(filters);
     loop {
-        let path = repo.path(&format!("actions/runs?page={page}&limit={}", paging.limit));
+        let path = repo.path(&format!(
+            "actions/runs?page={page}&limit={}{}",
+            paging.limit, query
+        ));
         let (response, headers) = repo.get::<ActionRunList>(&path, "action run list")?;
         let body_total = usize::try_from(response.total_count)
             .map_err(|_| Error::data("action run list total does not fit this platform"))?;
@@ -124,6 +128,25 @@ fn list(common: &Args, paging: &PageArgs) -> Result<Outcome, Error> {
             .ok_or_else(|| Error::data("page number overflow"))?;
     }
     render_list(common.json, values)
+}
+
+fn filter_query(filters: &RunFilters) -> String {
+    let mut query = String::new();
+    for (name, value) in [
+        ("status", &filters.status),
+        ("event", &filters.event),
+        ("ref", &filters.reference),
+        ("head_sha", &filters.head_sha),
+        ("workflow_id", &filters.workflow),
+    ] {
+        if let Some(value) = value {
+            query.push('&');
+            query.push_str(name);
+            query.push('=');
+            query.push_str(&encode_path(value));
+        }
+    }
+    query
 }
 
 fn view(common: &Args, id: u64) -> Result<Outcome, Error> {

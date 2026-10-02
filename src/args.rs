@@ -5,10 +5,16 @@ use lexopt::prelude::*;
 use crate::error::Error;
 
 #[derive(Debug)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent global CLI switches"
+)]
 pub(crate) struct Args {
     pub(crate) host: Option<String>,
     pub(crate) repo: Option<String>,
     pub(crate) json: bool,
+    pub(crate) fields: Vec<String>,
+    pub(crate) human: bool,
     pub(crate) dry_run: bool,
     pub(crate) yes: bool,
     pub(crate) command: Command,
@@ -31,7 +37,8 @@ pub(crate) enum Command {
     Branch(BranchArgs),
     Workflow(WorkflowArgs),
     Api(ApiArgs),
-    Help,
+    Help { path: Vec<String> },
+    Schema { path: Vec<String> },
     Version,
 }
 
@@ -74,9 +81,18 @@ pub(crate) enum BodySource {
 
 #[derive(Debug)]
 pub(crate) enum IssueArgs {
+    Comments {
+        number: u64,
+        paging: PageArgs,
+    },
+    Edit {
+        number: u64,
+        edit: EditArgs,
+    },
     List {
         state: ListState,
         paging: PageArgs,
+        filters: IssueFilters,
     },
     View {
         number: u64,
@@ -84,6 +100,7 @@ pub(crate) enum IssueArgs {
     Create {
         title: String,
         body: Option<BodySource>,
+        metadata: MetadataArgs,
     },
     Comment {
         number: u64,
@@ -125,9 +142,36 @@ impl MergeStyle {
 
 #[derive(Debug)]
 pub(crate) enum PullArgs {
+    Comments {
+        number: u64,
+        paging: PageArgs,
+    },
+    Reviews {
+        number: u64,
+        paging: PageArgs,
+    },
+    Files {
+        number: u64,
+        paging: PageArgs,
+    },
+    ReviewComments {
+        number: u64,
+        review_id: u64,
+        paging: PageArgs,
+    },
+    Edit {
+        number: u64,
+        edit: EditArgs,
+    },
+    RequestReview {
+        number: u64,
+        reviewers: Vec<String>,
+        teams: Vec<String>,
+    },
     List {
         state: ListState,
         paging: PageArgs,
+        filters: PullFilters,
     },
     View {
         number: u64,
@@ -138,6 +182,7 @@ pub(crate) enum PullArgs {
         base: Option<String>,
         body: Option<BodySource>,
         draft: bool,
+        metadata: MetadataArgs,
     },
     Diff {
         number: u64,
@@ -153,6 +198,8 @@ pub(crate) enum PullArgs {
         number: u64,
         event: ReviewEvent,
         body: Option<BodySource>,
+        comments_file: Option<OsString>,
+        commit: Option<String>,
     },
     Merge {
         number: u64,
@@ -160,6 +207,8 @@ pub(crate) enum PullArgs {
         title: Option<String>,
         message: Option<String>,
         delete_branch: bool,
+        match_head: Option<String>,
+        auto: bool,
     },
     Close {
         number: u64,
@@ -171,9 +220,18 @@ pub(crate) enum PullArgs {
 
 #[derive(Debug)]
 pub(crate) enum RunArgs {
-    List { paging: PageArgs },
-    View { id: u64 },
-    Watch { id: u64, poll: u64, wait: u64 },
+    List {
+        paging: PageArgs,
+        filters: RunFilters,
+    },
+    View {
+        id: u64,
+    },
+    Watch {
+        id: u64,
+        poll: u64,
+        wait: u64,
+    },
 }
 
 #[derive(Debug)]
@@ -245,6 +303,60 @@ pub(crate) struct ApiArgs {
     pub(crate) paginate: bool,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct IssueFilters {
+    pub(crate) labels: Vec<String>,
+    pub(crate) author: Option<String>,
+    pub(crate) assignee: Option<String>,
+    pub(crate) search: Option<String>,
+    pub(crate) milestone: Option<String>,
+    pub(crate) since: Option<String>,
+    pub(crate) before: Option<String>,
+    pub(crate) sort: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct PullFilters {
+    pub(crate) labels: Vec<String>,
+    pub(crate) author: Option<String>,
+    pub(crate) milestone: Option<String>,
+    pub(crate) sort: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct RunFilters {
+    pub(crate) status: Option<String>,
+    pub(crate) event: Option<String>,
+    pub(crate) reference: Option<String>,
+    pub(crate) head_sha: Option<String>,
+    pub(crate) workflow: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct MetadataArgs {
+    pub(crate) labels: Vec<String>,
+    pub(crate) label_ids: Vec<u64>,
+    pub(crate) assignees: Vec<String>,
+    pub(crate) milestone: Option<String>,
+    pub(crate) milestone_id: Option<u64>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct EditArgs {
+    pub(crate) title: Option<String>,
+    pub(crate) body: Option<BodySource>,
+    pub(crate) base: Option<String>,
+    pub(crate) add_labels: Vec<String>,
+    pub(crate) remove_labels: Vec<String>,
+    pub(crate) add_label_ids: Vec<u64>,
+    pub(crate) remove_label_ids: Vec<u64>,
+    pub(crate) add_assignees: Vec<String>,
+    pub(crate) remove_assignees: Vec<String>,
+    pub(crate) milestone: Option<String>,
+    pub(crate) milestone_id: Option<u64>,
+    pub(crate) clear_milestone: bool,
+}
+
 #[derive(Default)]
 #[allow(
     clippy::struct_excessive_bools,
@@ -280,6 +392,16 @@ struct Specific {
     prerelease: bool,
     reference: Option<String>,
     fields: Vec<String>,
+    metadata: MetadataArgs,
+    edit: EditArgs,
+    filters: IssueFilters,
+    run_filters: RunFilters,
+    reviewers: Vec<String>,
+    teams: Vec<String>,
+    comments_file: Option<OsString>,
+    commit: Option<String>,
+    match_head: Option<String>,
+    auto: bool,
 }
 
 #[allow(
@@ -287,10 +409,25 @@ struct Specific {
     reason = "one flat parser keeps common flags valid at every command position"
 )]
 pub(crate) fn parse() -> Result<Args, Error> {
-    let mut parser = lexopt::Parser::from_env();
+    parse_parser(lexopt::Parser::from_env())
+}
+
+#[cfg(test)]
+#[allow(
+    dead_code,
+    reason = "offline integration tests exercise the private parser"
+)]
+pub(crate) fn parse_from(args: impl IntoIterator<Item = OsString>) -> Result<Args, Error> {
+    parse_parser(lexopt::Parser::from_args(args))
+}
+
+#[allow(clippy::too_many_lines, reason = "flat command parser")]
+fn parse_parser(mut parser: lexopt::Parser) -> Result<Args, Error> {
     let (mut host, mut repo) = (None, None);
     let (mut json, mut dry_run, mut yes, mut help, mut version) =
         (false, false, false, false, false);
+    let mut human = false;
+    let mut fields = None;
     let mut specific = Specific::default();
     let mut words = Vec::new();
     while let Some(argument) = parser
@@ -300,6 +437,12 @@ pub(crate) fn parse() -> Result<Args, Error> {
         match argument {
             Long("host") => set_once(&mut host, string_value(&mut parser, "--host")?, "--host")?,
             Short('R') => set_once(&mut repo, string_value(&mut parser, "-R")?, "-R")?,
+            Long("human") => set_switch(&mut human, "--human")?,
+            Long("fields") => set_once(
+                &mut fields,
+                string_value(&mut parser, "--fields")?,
+                "--fields",
+            )?,
             Long("json") => set_switch(&mut json, "--json")?,
             Long("dry-run") => set_switch(&mut dry_run, "--dry-run")?,
             Long("yes") => set_switch(&mut yes, "--yes")?,
@@ -412,6 +555,76 @@ pub(crate) fn parse() -> Result<Args, Error> {
                 "--ref",
             )?,
             Long("field") => specific.fields.push(string_value(&mut parser, "--field")?),
+            Long(
+                flag @ ("label" | "assignee" | "reviewer" | "team" | "add-label" | "remove-label"
+                | "add-assignee" | "remove-assignee"),
+            ) => {
+                let flag = flag.to_owned();
+                let flag = flag.as_str();
+                let value = string_value(&mut parser, flag)?;
+                let value = nonempty(&value, flag)?;
+                let slot = match flag {
+                    "label" => &mut specific.metadata.labels,
+                    "assignee" => &mut specific.metadata.assignees,
+                    "reviewer" => &mut specific.reviewers,
+                    "team" => &mut specific.teams,
+                    "add-label" => &mut specific.edit.add_labels,
+                    "remove-label" => &mut specific.edit.remove_labels,
+                    "add-assignee" => &mut specific.edit.add_assignees,
+                    _ => &mut specific.edit.remove_assignees,
+                };
+                slot.push(value);
+            }
+            Long(flag @ ("label-id" | "add-label-id" | "remove-label-id")) => {
+                let flag = flag.to_owned();
+                let flag = flag.as_str();
+                let value = positive(&string_value(&mut parser, flag)?, flag)?;
+                match flag {
+                    "label-id" => specific.metadata.label_ids.push(value),
+                    "add-label-id" => specific.edit.add_label_ids.push(value),
+                    _ => specific.edit.remove_label_ids.push(value),
+                }
+            }
+            Long("milestone-id") => set_once(
+                &mut specific.metadata.milestone_id,
+                positive(
+                    &string_value(&mut parser, "--milestone-id")?,
+                    "milestone ID",
+                )?,
+                "--milestone-id",
+            )?,
+            Long("clear-milestone") => {
+                set_switch(&mut specific.edit.clear_milestone, "--clear-milestone")?;
+            }
+            Long("auto") => set_switch(&mut specific.auto, "--auto")?,
+            Long("comments-file") => set_once(
+                &mut specific.comments_file,
+                os_value(&mut parser)?,
+                "--comments-file",
+            )?,
+            Long(
+                flag @ ("author" | "search" | "milestone" | "since" | "before" | "sort" | "status"
+                | "head-sha" | "workflow" | "commit" | "match-head"),
+            ) => {
+                let flag = flag.to_owned();
+                let flag = flag.as_str();
+                let value = string_value(&mut parser, flag)?;
+                let value = nonempty(&value, flag)?;
+                let slot = match flag {
+                    "author" => &mut specific.filters.author,
+                    "search" => &mut specific.filters.search,
+                    "milestone" => &mut specific.metadata.milestone,
+                    "since" => &mut specific.filters.since,
+                    "before" => &mut specific.filters.before,
+                    "sort" => &mut specific.filters.sort,
+                    "status" => &mut specific.run_filters.status,
+                    "head-sha" => &mut specific.run_filters.head_sha,
+                    "workflow" => &mut specific.run_filters.workflow,
+                    "commit" => &mut specific.commit,
+                    _ => &mut specific.match_head,
+                };
+                set_once(slot, value, flag)?;
+            }
             Short('h') | Long("help") => set_switch(&mut help, "--help")?,
             Short('V') | Long("version") => set_switch(&mut version, "--version")?,
             Value(value) => words.push(
@@ -422,18 +635,54 @@ pub(crate) fn parse() -> Result<Args, Error> {
             other => return Err(Error::usage(other.unexpected().to_string())),
         }
     }
-    let command = if help {
-        Command::Help
+    if human && json {
+        return Err(Error::usage("--human conflicts with --json"));
+    }
+    if fields.is_some() && !json {
+        return Err(Error::usage("--fields requires --json"));
+    }
+    let fields = fields.map_or(Ok(Vec::new()), |value: String| {
+        value
+            .split(',')
+            .map(|field| nonempty(field.trim(), "field"))
+            .collect::<Result<Vec<_>, _>>()
+    })?;
+    let command = if help || words.first().is_some_and(|word| word == "help") {
+        let path = if help {
+            command_help_path(&words)?
+        } else {
+            validate_path(&words[1..])?
+        };
+        consume_help_flags(&path, &mut specific)?;
+        Command::Help { path }
+    } else if words.first().is_some_and(|word| word == "schema") {
+        if !json {
+            return Err(Error::usage("schema requires --json"));
+        }
+        Command::Schema {
+            path: validate_path(&words[1..])?,
+        }
     } else if version {
         Command::Version
     } else {
         parse_command(&words, &mut specific)?
     };
+    let human_scope = matches!(
+        &command,
+        Command::Issue(IssueArgs::View { .. }) | Command::Pull(PullArgs::View { .. })
+    ) || matches!(&command, Command::Help { path } if path.len() == 2 && (path[0] == "issue" || path[0] == "pr") && path[1] == "view");
+    if human && !human_scope {
+        return Err(Error::usage(
+            "--human is only valid for issue view and pr view",
+        ));
+    }
     specific.ensure_empty()?;
     Ok(Args {
         host,
         repo,
         json,
+        fields,
+        human,
         dry_run,
         yes,
         command,
@@ -446,6 +695,44 @@ pub(crate) fn parse() -> Result<Args, Error> {
 )]
 fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
     match words {
+        [a, b, n] if a == "issue" && b == "comments" => Ok(Command::Issue(IssueArgs::Comments {
+            number: positive(n, "issue number")?,
+            paging: o.take_paging()?,
+        })),
+        [a, b, n] if a == "issue" && b == "edit" => Ok(Command::Issue(IssueArgs::Edit {
+            number: positive(n, "issue number")?,
+            edit: o.take_edit(false)?,
+        })),
+        [a, b, n] if a == "pr" && matches!(b.as_str(), "comments" | "reviews" | "files") => {
+            let number = positive(n, "pull request number")?;
+            let paging = o.take_paging()?;
+            Ok(Command::Pull(match b.as_str() {
+                "comments" => PullArgs::Comments { number, paging },
+                "reviews" => PullArgs::Reviews { number, paging },
+                _ => PullArgs::Files { number, paging },
+            }))
+        }
+        [a, b, n, id] if a == "pr" && b == "review-comments" => {
+            Ok(Command::Pull(PullArgs::ReviewComments {
+                number: positive(n, "pull request number")?,
+                review_id: positive(id, "review ID")?,
+                paging: o.take_paging()?,
+            }))
+        }
+        [a, b, n] if a == "pr" && b == "edit" => Ok(Command::Pull(PullArgs::Edit {
+            number: positive(n, "pull request number")?,
+            edit: o.take_edit(true)?,
+        })),
+        [a, b, n] if a == "pr" && b == "request-review" => {
+            if o.reviewers.is_empty() && o.teams.is_empty() {
+                return Err(Error::usage("request-review requires --reviewer or --team"));
+            }
+            Ok(Command::Pull(PullArgs::RequestReview {
+                number: positive(n, "pull request number")?,
+                reviewers: std::mem::take(&mut o.reviewers),
+                teams: std::mem::take(&mut o.teams),
+            }))
+        }
         [a, b] if a == "auth" && b == "login" => Ok(Command::AuthLogin {
             with_token: o.take_with_token(),
         }),
@@ -465,6 +752,7 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
         [a, b] if a == "issue" && b == "list" => Ok(Command::Issue(IssueArgs::List {
             state: o.take_state()?,
             paging: o.take_paging()?,
+            filters: o.take_issue_filters()?,
         })),
         [a, b, n] if a == "issue" && b == "view" => Ok(Command::Issue(IssueArgs::View {
             number: positive(n, "issue number")?,
@@ -472,6 +760,7 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
         [a, b] if a == "issue" && b == "create" => Ok(Command::Issue(IssueArgs::Create {
             title: o.take_required_title()?,
             body: o.take_body(false)?,
+            metadata: o.take_metadata()?,
         })),
         [a, b, n] if a == "issue" && b == "comment" => Ok(Command::Issue(IssueArgs::Comment {
             number: positive(n, "issue number")?,
@@ -488,6 +777,7 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
         [a, b] if a == "pr" && b == "list" => Ok(Command::Pull(PullArgs::List {
             state: o.take_state()?,
             paging: o.take_paging()?,
+            filters: o.take_pull_filters(),
         })),
         [a, b, n] if a == "pr" && b == "view" => Ok(Command::Pull(PullArgs::View {
             number: positive(n, "pull request number")?,
@@ -519,6 +809,7 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
         })),
         [a, b] if a == "run" && b == "list" => Ok(Command::Run(RunArgs::List {
             paging: o.take_paging()?,
+            filters: o.take_run_filters(),
         })),
         [a, b, id] if a == "run" && b == "view" => Ok(Command::Run(RunArgs::View {
             id: positive(id, "run ID")?,
@@ -575,6 +866,93 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
 }
 
 impl Specific {
+    fn take_metadata(&mut self) -> Result<MetadataArgs, Error> {
+        if self.metadata.milestone.is_some() && self.metadata.milestone_id.is_some() {
+            return Err(Error::usage("--milestone conflicts with --milestone-id"));
+        }
+        Ok(std::mem::take(&mut self.metadata))
+    }
+
+    fn take_issue_filters(&mut self) -> Result<IssueFilters, Error> {
+        let mut filters = std::mem::take(&mut self.filters);
+        filters.labels = std::mem::take(&mut self.metadata.labels);
+        if self.metadata.assignees.len() > 1 {
+            return Err(Error::usage("issue list accepts one --assignee"));
+        }
+        filters.assignee = self.metadata.assignees.pop();
+        filters.milestone = self.metadata.milestone.take();
+        for (date, name) in [(&filters.since, "--since"), (&filters.before, "--before")] {
+            if date
+                .as_deref()
+                .is_some_and(|value| !is_rfc3339_date_time(value))
+            {
+                return Err(Error::usage(format!("{name} must be an RFC3339 date-time")));
+            }
+        }
+        Ok(filters)
+    }
+
+    fn take_pull_filters(&mut self) -> PullFilters {
+        PullFilters {
+            labels: std::mem::take(&mut self.metadata.labels),
+            author: self.filters.author.take(),
+            milestone: self.metadata.milestone.take(),
+            sort: self.filters.sort.take(),
+        }
+    }
+
+    fn take_run_filters(&mut self) -> RunFilters {
+        let mut filters = std::mem::take(&mut self.run_filters);
+        filters.event = self.event.take();
+        filters.reference = self.reference.take();
+        filters
+    }
+
+    fn take_edit(&mut self, pull: bool) -> Result<EditArgs, Error> {
+        let metadata = self.take_metadata()?;
+        if !metadata.labels.is_empty()
+            || !metadata.label_ids.is_empty()
+            || !metadata.assignees.is_empty()
+        {
+            return Err(Error::usage("edit requires --add/--remove metadata flags"));
+        }
+        let mut edit = std::mem::take(&mut self.edit);
+        edit.title = take_optional_nonempty(&mut self.title, "--title")?;
+        edit.body = self.take_body(false)?;
+        if pull {
+            edit.base = take_optional_nonempty(&mut self.base, "--base")?;
+        }
+        edit.milestone = metadata.milestone;
+        edit.milestone_id = metadata.milestone_id;
+        if edit.clear_milestone && (edit.milestone.is_some() || edit.milestone_id.is_some()) {
+            return Err(Error::usage(
+                "--clear-milestone conflicts with milestone selection",
+            ));
+        }
+        if overlaps(&edit.add_labels, &edit.remove_labels)
+            || overlaps(&edit.add_label_ids, &edit.remove_label_ids)
+            || overlaps(&edit.add_assignees, &edit.remove_assignees)
+        {
+            return Err(Error::usage("cannot add and remove the same metadata"));
+        }
+        if edit.title.is_none()
+            && edit.body.is_none()
+            && edit.base.is_none()
+            && edit.add_labels.is_empty()
+            && edit.remove_labels.is_empty()
+            && edit.add_label_ids.is_empty()
+            && edit.remove_label_ids.is_empty()
+            && edit.add_assignees.is_empty()
+            && edit.remove_assignees.is_empty()
+            && edit.milestone.is_none()
+            && edit.milestone_id.is_none()
+            && !edit.clear_milestone
+        {
+            return Err(Error::usage("edit requires at least one change"));
+        }
+        Ok(edit)
+    }
+
     fn take_with_token(&mut self) -> bool {
         std::mem::take(&mut self.with_token)
     }
@@ -650,6 +1028,7 @@ impl Specific {
             base,
             body: self.take_body(false)?,
             draft: std::mem::take(&mut self.draft),
+            metadata: self.take_metadata()?,
         })
     }
 
@@ -666,7 +1045,11 @@ impl Specific {
             None => return Err(Error::usage("pr review requires --event")),
         };
         let body = self.take_body(false)?;
-        if !matches!(event, ReviewEvent::Approve) && body.is_none() {
+        if self.comments_file.is_some() && self.commit.is_none() {
+            return Err(Error::usage("--comments-file requires --commit"));
+        }
+        if !matches!(event, ReviewEvent::Approve) && body.is_none() && self.comments_file.is_none()
+        {
             return Err(Error::usage(
                 "review body is required for request-changes and comment",
             ));
@@ -675,6 +1058,8 @@ impl Specific {
             number,
             event,
             body,
+            comments_file: self.comments_file.take(),
+            commit: self.commit.take(),
         })
     }
 
@@ -696,6 +1081,8 @@ impl Specific {
             title: self.title.take(),
             message: self.message.take(),
             delete_branch: std::mem::take(&mut self.delete_branch),
+            match_head: self.match_head.take(),
+            auto: std::mem::take(&mut self.auto),
         })
     }
 
@@ -781,6 +1168,32 @@ impl Specific {
 
     fn ensure_empty(&self) -> Result<(), Error> {
         let unused = [
+            (!self.metadata.labels.is_empty(), "--label"),
+            (!self.metadata.label_ids.is_empty(), "--label-id"),
+            (!self.metadata.assignees.is_empty(), "--assignee"),
+            (self.metadata.milestone.is_some(), "--milestone"),
+            (self.metadata.milestone_id.is_some(), "--milestone-id"),
+            (!self.edit.add_labels.is_empty(), "--add-label"),
+            (!self.edit.remove_labels.is_empty(), "--remove-label"),
+            (!self.edit.add_label_ids.is_empty(), "--add-label-id"),
+            (!self.edit.remove_label_ids.is_empty(), "--remove-label-id"),
+            (!self.edit.add_assignees.is_empty(), "--add-assignee"),
+            (!self.edit.remove_assignees.is_empty(), "--remove-assignee"),
+            (self.edit.clear_milestone, "--clear-milestone"),
+            (self.filters.author.is_some(), "--author"),
+            (self.filters.search.is_some(), "--search"),
+            (self.filters.since.is_some(), "--since"),
+            (self.filters.before.is_some(), "--before"),
+            (self.filters.sort.is_some(), "--sort"),
+            (self.run_filters.status.is_some(), "--status"),
+            (self.run_filters.head_sha.is_some(), "--head-sha"),
+            (self.run_filters.workflow.is_some(), "--workflow"),
+            (!self.reviewers.is_empty(), "--reviewer"),
+            (!self.teams.is_empty(), "--team"),
+            (self.comments_file.is_some(), "--comments-file"),
+            (self.commit.is_some(), "--commit"),
+            (self.match_head.is_some(), "--match-head"),
+            (self.auto, "--auto"),
             (self.with_token, "--with-token"),
             (self.method.is_some(), "-X"),
             (self.input.is_some(), "--input"),
@@ -821,6 +1234,218 @@ impl Specific {
             Ok(())
         }
     }
+}
+
+fn overlaps<T: PartialEq>(add: &[T], remove: &[T]) -> bool {
+    add.iter().any(|value| remove.contains(value))
+}
+
+fn subcommands(group: &str) -> &'static [&'static str] {
+    match group {
+        "auth" => &["login", "status", "logout", "setup-git", "git-credential"],
+        "repo" => &["view"],
+        "issue" => &[
+            "list", "view", "create", "comment", "comments", "edit", "close", "reopen",
+        ],
+        "pr" => &[
+            "list",
+            "view",
+            "create",
+            "diff",
+            "checks",
+            "comment",
+            "comments",
+            "reviews",
+            "files",
+            "review-comments",
+            "edit",
+            "request-review",
+            "review",
+            "merge",
+            "close",
+            "reopen",
+        ],
+        "run" => &["list", "view", "watch"],
+        "release" => &["list", "view", "create", "upload"],
+        "label" | "milestone" => &["list", "create"],
+        "branch" => &["list", "delete"],
+        "workflow" => &["dispatch"],
+        _ => &[],
+    }
+}
+
+fn validate_path(path: &[String]) -> Result<Vec<String>, Error> {
+    let valid = match path {
+        [] => true,
+        [group] => {
+            !subcommands(group).is_empty() || matches!(group.as_str(), "api" | "help" | "schema")
+        }
+        [group, command] => subcommands(group).contains(&command.as_str()),
+        _ => false,
+    };
+    if valid {
+        Ok(path.to_vec())
+    } else {
+        Err(Error::usage("unknown help/schema command path"))
+    }
+}
+
+fn command_help_path(words: &[String]) -> Result<Vec<String>, Error> {
+    if words
+        .first()
+        .is_some_and(|word| matches!(word.as_str(), "help" | "schema"))
+    {
+        return validate_path(&words[1..]);
+    }
+    let length = if words.first().is_some_and(|word| word == "api") {
+        1
+    } else {
+        words.len().min(2)
+    };
+    let path = validate_path(&words[..length])?;
+    let maximum = match path.as_slice() {
+        [group, command] if group == "pr" && command == "review-comments" => 4,
+        [group, command] if group == "release" && command == "upload" => 4,
+        [_, command]
+            if matches!(
+                command.as_str(),
+                "list" | "create" | "login" | "status" | "logout" | "setup-git"
+            ) =>
+        {
+            2
+        }
+        [_] if path[0] == "api" => 2,
+        _ => 3,
+    };
+    if words.len() > maximum {
+        return Err(Error::usage("too many command arguments"));
+    }
+    Ok(path)
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "help consumes only command-scoped options without requiring inputs"
+)]
+fn consume_help_flags(path: &[String], o: &mut Specific) -> Result<(), Error> {
+    let group = path.first().map_or("", String::as_str);
+    let command = path.get(1).map_or("", String::as_str);
+    if group == "api" {
+        o.method.take();
+        o.input.take();
+        o.paginate = false;
+    }
+    if group == "auth" && command == "login" {
+        o.with_token = false;
+    }
+    if command == "list"
+        || (matches!(group, "issue" | "pr")
+            && matches!(
+                command,
+                "comments" | "reviews" | "files" | "review-comments"
+            ))
+    {
+        o.page.take();
+        o.limit.take();
+        o.all = false;
+    }
+    if command == "list" && matches!(group, "issue" | "pr" | "milestone") {
+        o.state.take();
+    }
+    if command == "list" && matches!(group, "issue" | "pr") {
+        o.metadata.labels.clear();
+        o.metadata.milestone.take();
+        o.filters.author.take();
+        o.filters.sort.take();
+        if group == "issue" {
+            o.metadata.assignees.clear();
+            o.filters.search.take();
+            o.filters.since.take();
+            o.filters.before.take();
+        }
+    }
+    if group == "run" && command == "list" {
+        o.run_filters = RunFilters::default();
+        o.event.take();
+        o.reference.take();
+    }
+    if command == "create" && matches!(group, "issue" | "pr") {
+        o.metadata = MetadataArgs::default();
+    }
+    if command == "edit" && matches!(group, "issue" | "pr") {
+        o.edit = EditArgs::default();
+        o.metadata.milestone.take();
+        o.metadata.milestone_id.take();
+        o.title.take();
+        o.body.take();
+        o.body_file.take();
+        if group == "pr" {
+            o.base.take();
+        }
+    }
+    if command == "create" && matches!(group, "issue" | "pr" | "release" | "milestone") {
+        o.title.take();
+    }
+    if (command == "create" && matches!(group, "issue" | "pr" | "release"))
+        || (matches!(command, "comment" | "review") && matches!(group, "issue" | "pr"))
+    {
+        o.body.take();
+        o.body_file.take();
+    }
+    if group == "pr" {
+        match command {
+            "create" => {
+                o.head.take();
+                o.base.take();
+                o.draft = false;
+            }
+            "review" => {
+                o.event.take();
+                o.comments_file.take();
+                o.commit.take();
+            }
+            "merge" => {
+                o.style.take();
+                o.title.take();
+                o.message.take();
+                o.delete_branch = false;
+                o.match_head.take();
+                o.auto = false;
+            }
+            "request-review" => {
+                o.reviewers.clear();
+                o.teams.clear();
+            }
+            _ => {}
+        }
+    }
+    if group == "run" && command == "watch" {
+        o.poll.take();
+        o.wait.take();
+    }
+    if group == "release" && command == "create" {
+        o.tag.take();
+        o.target.take();
+        o.draft = false;
+        o.prerelease = false;
+    }
+    if group == "release" && command == "upload" {
+        o.name.take();
+    }
+    if group == "label" && command == "create" {
+        o.name.take();
+        o.color.take();
+        o.description.take();
+    }
+    if group == "milestone" && command == "create" {
+        o.description.take();
+        o.due.take();
+    }
+    if group == "workflow" && command == "dispatch" {
+        o.reference.take();
+        o.fields.clear();
+    }
+    o.ensure_empty()
 }
 
 fn positive(value: &str, name: &str) -> Result<u64, Error> {

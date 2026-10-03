@@ -1,6 +1,6 @@
 # fjx
 
-`fjx` is a small synchronous Forgejo client for people and scripts. Version 0.2.1 targets Forgejo 15.0.7.
+`fjx` is a small synchronous Forgejo client for people and scripts. Version 0.3.0 targets Forgejo 15.0.7.
 Manage issues, pull requests, action runs, and releases from your terminal, with
 stable plain output and compact JSON for automation.
 

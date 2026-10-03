@@ -1,6 +1,6 @@
 # Release maintenance
 
-The source version is 0.2.1. GitHub binary releases are published manually;
+The source version is 0.3.0. GitHub binary releases are published manually;
 this repository does not publish assets automatically or publish to crates.io
 (`publish = false`). GitHub CI checks the project on Ubuntu 24.04, not native
 Windows or macOS. Packaging helpers are tooling, not evidence that a particular
@@ -28,10 +28,10 @@ not the current directory or checkout name. `RELEASE_WORKSPACE_ROOT` is a
 legacy fixture override that expects a parent directory containing `fjx/`;
 leave it unset for ordinary standalone use.
 
-Tags use `fjx/vVERSION`, for example `fjx/v0.2.1`. Validate a proposed tag with:
+Tags use `fjx/vVERSION`, for example `fjx/v0.3.0`. Validate a proposed tag with:
 
 ```sh
-nu --no-config-file scripts/release.nu validate-tag fjx/v0.2.1
+nu --no-config-file scripts/release.nu validate-tag fjx/v0.3.0
 ```
 
 Do not push tags or publish assets until the intended remote and release process
@@ -69,7 +69,7 @@ Verification checks inventory, checksums, archive entries, executable modes,
 and binary formats:
 
 ```sh
-nu --no-config-file scripts/package-release.nu verify ./release-assets 0.2.1
+nu --no-config-file scripts/package-release.nu verify ./release-assets 0.3.0
 ```
 
 These operations require GNU coreutils, `tar`, `gzip`, `zip`, `unzip`, and `file`.
@@ -99,11 +99,11 @@ helpers below are not compatible with GitHub. Before publication:
    release commit:
 
    ```sh
-   git tag -a fjx/v0.2.1 -m "fjx v0.2.1"
-   git push origin refs/tags/fjx/v0.2.1
-   gh release create fjx/v0.2.1 --repo DaltonAlley/fjx --verify-tag --draft \
-     --title "fjx v0.2.1" --notes-file ../release-notes.md ../release-assets/*
-   gh release view fjx/v0.2.1 --repo DaltonAlley/fjx
+   git tag -a fjx/v0.3.0 -m "fjx v0.3.0"
+   git push origin refs/tags/fjx/v0.3.0
+   gh release create fjx/v0.3.0 --repo DaltonAlley/fjx --verify-tag --draft \
+     --title "fjx v0.3.0" --notes-file ../release-notes.md ../release-assets/*
+   gh release view fjx/v0.3.0 --repo DaltonAlley/fjx
    ```
 
 5. Check that the remote tag points to the intended commit and download the
@@ -111,7 +111,7 @@ helpers below are not compatible with GitHub. Before publication:
    directory before publishing:
 
    ```sh
-   gh release edit fjx/v0.2.1 --repo DaltonAlley/fjx --draft=false --latest
+   gh release edit fjx/v0.3.0 --repo DaltonAlley/fjx --draft=false --latest
    ```
 
 Verify the published release and its asset inventory once more. If a write

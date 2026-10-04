@@ -180,9 +180,8 @@ response for a different PR-head SHA or with contradictory child failures is an
 incompatible-data error rather than success. FJX never automatically retries a
 review, edit, or merge.
 
-## Verification and measurement
+## Verification
 
 The integration suite runs the real executable against local, schema-compatible
 HTTP fixtures, including failure and pagination paths. This does not claim native
-Windows/macOS or live-server coverage. See [benchmarks](benchmarks.md) for the
-repeatable before/after measurements, fixture sizes, and limitations.
+Windows/macOS or live-server coverage.

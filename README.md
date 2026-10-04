@@ -49,7 +49,6 @@ Windows uses environment tokens rather than saved logins.
 
 - [Command examples](#command-examples), [configuration and safety](#configuration-and-safety), and [output contracts](#output-contracts)
 - [Issue and PR workflows](docs/cli-workflows.md), including selective output, triage, and inline reviews
-- [Reproducible CLI benchmarks](docs/benchmarks.md)
 - [Architecture](docs/architecture.md) and [release maintenance](docs/releasing.md)
 - [MIT license](LICENSE)
 - [Repository maintenance and settings](docs/repository-maintenance.md)

@@ -1,6 +1,6 @@
 # fjx
 
-`fjx` is a small synchronous Forgejo client for people and scripts. Version 0.3.0 targets Forgejo 15.0.7.
+`fjx` is a small synchronous Forgejo client for people and scripts. Version 0.3.1 targets Forgejo 15.0.7.
 Manage issues, pull requests, action runs, and releases from your terminal, with
 stable plain output and compact JSON for automation.
 
@@ -129,7 +129,15 @@ also require Git, Bash, `script` (util-linux), GNU coreutils, `tar`, `gzip`,
 nu --no-config-file scripts/check.nu
 ```
 
-This runs Cargo format, Clippy, tests, and docs, plus the repository and release
+On Linux with Nix, [shell.nix](shell.nix) supplies the pinned Rust toolchain and
+check utilities. It requires a `nixpkgs` channel with Nushell 0.112.2:
+
+```sh
+nix-shell --run 'nu --no-config-file scripts/check.nu'
+nix-shell --run 'cargo build --locked --release'
+```
+
+The check script runs Cargo format, Clippy, tests, and docs, plus the repository and release
 Nushell tests and version validation. The standalone GitHub CI runs on Ubuntu
 24.04; it does not provide native Windows or macOS testing or publish binary
 releases automatically. Releases are published manually with verified archives

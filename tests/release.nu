@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-use ../scripts/release.nu [publication-plan]
+use ../scripts/release.nu [publication-plan create-release]
 use ../scripts/package-release.nu [release-targets]
 use ../scripts/release-smoke.nu [run-arm64-smoke-container]
 
@@ -520,6 +520,52 @@ def test-authenticated-release-origin [] {
   rm -rf $root
 }
 
+def test-create-release [] {
+  let root = mktemp -d
+  let tool = $root | path join curl
+  let calls = $root | path join calls
+  [
+    '#!/usr/bin/env -S nu --no-config-file'
+    'def --wrapped main [...args: string] {'
+    '  "request\n" | save --append --raw $env.FAKE_CREATE_CALLS'
+    '  let header = open --raw /dev/stdin'
+    '  if not ($header | str contains "Authorization: token fixture-create") { exit 9 }'
+    '  if ($args | str join " " | str contains "fixture-create") { exit 9 }'
+    '  if ($args | last) != "https://forge.example/forgejo/api/v1/repos/dalton/fjx/releases" { exit 9 }'
+    '  let body_index = $args | enumerate | where item == "--data-binary" | first | get index'
+    '  let body_path = $args | get ($body_index + 1) | str substring 1..'
+    '  let body = open --raw $body_path | from json'
+    '  if $body != {tag_name: "fjx/v1.2.3", name: "fjx (1.2.3)", body: "", draft: false, prerelease: false} { exit 9 }'
+    '  let output_index = $args | enumerate | where item == "--output" | first | get index'
+    '  $body | insert id 42 | to json | save --force --raw ($args | get ($output_index + 1))'
+    '  print --no-newline $env.FAKE_CREATE_STATUS'
+    '}'
+  ] | str join (char nl) | save --raw $tool
+  chmod 0755 $tool
+  try {
+    with-env {
+      PATH: ($env.PATH | prepend $root)
+      FORGEJO_API_URL: 'https://forge.example/forgejo/api/v1'
+      FORGEJO_REPOSITORY: 'dalton/fjx'
+      FORGEJO_TOKEN: fixture-create
+      FAKE_CREATE_CALLS: $calls
+      FAKE_CREATE_STATUS: '201'
+    } {
+      check ((create-release 1.2.3 fjx/v1.2.3) == 42) 'release creation must return its verified ID'
+      '' | save --force --raw $calls
+      let rejected = with-env {FAKE_CREATE_STATUS: '503'} {
+        try { create-release 1.2.3 fjx/v1.2.3 | ignore; false } catch { true }
+      }
+      check $rejected 'failed release creation must stop publication'
+      check (((open --raw $calls) | lines | length) == 1) 'release creation must never retry a write'
+    }
+  } catch {|error|
+    rm --recursive --force $root
+    error make $error.raw
+  }
+  rm --recursive --force $root
+}
+
 def test-release-build-contract [] {
   let targets = (release-targets)
   check (($targets | get triple) == [x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin x86_64-pc-windows-gnu]) "authoritative target inventory is wrong"
@@ -623,6 +669,7 @@ test-smoke-requires-wine
 test-publish-planning
 test-release-metadata-mutations
 test-authenticated-release-origin
+test-create-release
 test-release-build-contract
 test-ci-build-arguments
 print 'fjx release tests passed'

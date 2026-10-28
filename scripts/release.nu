@@ -437,6 +437,9 @@ export def create-release [version: string, tag: string] {
   }
   rm --force $request.response
   validate-release $release $version $tag
+  if (($release.id? | describe) !~ '^int') or $release.id <= 0 {
+    fail 'Forgejo returned an invalid release ID; inspect remote state before rerunning'
+  }
   $release.id
 }
 

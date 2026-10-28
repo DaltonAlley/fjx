@@ -6,9 +6,9 @@ def main [runner: path, image: string, registration_file: path] {
   let units = $env.HOME | path join .config systemd user
   mkdir $root $units
   chmod 0700 $root
+  let runtime = $env.XDG_RUNTIME_DIR? | default $"/run/user/(^id -u | str trim)"
   let token = (open --raw $registration_file | from json).token
   rm --force $registration_file
-  let runtime = $env.XDG_RUNTIME_DIR
   for kind in [ci release] {
     let directory = $root | path join $kind
     mkdir $directory

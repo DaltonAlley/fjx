@@ -180,6 +180,13 @@ response for a different PR-head SHA or with contradictory child failures is an
 incompatible-data error rather than success. FJX never automatically retries a
 review, edit, or merge.
 
+When no commit statuses exist, Forgejo can return an empty SHA and state with
+`total_count: 0` and null or empty statuses. `pr checks` recognizes this empty
+response and reports the requested head's SHA, `state: "unknown"`, and
+`statuses: []`, with exit code 1. No checks have been reported, so this result
+does not establish that checks passed. Nonempty mismatched SHAs and blank SHAs
+with a state or statuses still fail as incompatible data.
+
 ## Verification and measurement
 
 The integration suite runs the real executable against local, schema-compatible

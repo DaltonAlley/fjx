@@ -256,8 +256,15 @@ def download-release-asset [asset: record, name: string] {
     fail $"release asset ($name) has no valid Forgejo asset ID"
   }
 
+  # Forgejo's API attachment endpoint returns JSON metadata. Download the
+  # release's canonical web URL, after checking the exact repository/tag/name.
+  let base = $api | str replace --regex '/api/v1/?$' ''
+  let tag = $"fjx%2Fv(validate-versions)"
+  let request_url = $"($base)/($repository)/releases/download/($tag)/($name)"
+  if $url != $request_url {
+    fail $"release asset ($name) download URL must identify this exact repository, tag, and asset"
+  }
   let downloaded = mktemp
-  let request_url = $"($api)/repos/($repository)/releases/assets/($asset_id)"
   let request = do {
     ('header = ' + ($"Authorization: token ($token)" | to json --raw) + (char nl)) | ^curl --silent --show-error --proto '=https' --max-redirs 0 --config - --output $downloaded --write-out '%{http_code}' --request GET --header 'Accept: application/octet-stream' $request_url
   } | complete

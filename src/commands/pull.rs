@@ -604,7 +604,17 @@ fn checks(common: &Args, number: u64) -> Result<Outcome, Error> {
     let pull_path = repo.path(&format!("pulls/{number}"));
     let (pull, _) = repo.get::<PullResponse>(&pull_path, "pull request")?;
     let path = repo.path(&format!("commits/{}/status", encode_path(&pull.head.sha)));
-    let combined = collect_statuses(&repo, &path)?;
+    let mut combined = collect_statuses(&repo, &path)?;
+    // Forgejo returns a zero-valued CombinedStatus when no statuses exist.
+    // Bind only that empty response to the SHA used in the request; it remains
+    // unknown, never a successful check result.
+    if combined.sha.is_empty()
+        && combined.state.is_empty()
+        && combined.total_count == Some(0)
+        && combined.statuses.as_ref().is_none_or(Vec::is_empty)
+    {
+        combined.sha.clone_from(&pull.head.sha);
+    }
     if combined.sha != pull.head.sha {
         return Err(Error::data(
             "combined status SHA does not match pull request head",
@@ -740,7 +750,7 @@ fn collect_statuses(repo: &RepoClient, base: &str) -> Result<CombinedStatus, Err
         sha,
         state,
         statuses: Some(statuses),
-        total_count: None,
+        total_count: expected_total,
     })
 }
 

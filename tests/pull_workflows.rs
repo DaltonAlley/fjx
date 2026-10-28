@@ -352,15 +352,58 @@ fn human_view_preserves_lines_and_escapes_terminal_controls() {
 }
 
 #[test]
+fn checks_reports_forgejo_empty_status_as_unknown_for_the_requested_head() {
+    let empty: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/forgejo-17.0.0/combined-status-empty.json"
+    ))
+    .unwrap();
+    for statuses in [serde_json::Value::Null, serde_json::json!([])] {
+        let mut status = empty.clone();
+        status["statuses"] = statuses;
+        for format in [
+            vec!["--json"],
+            vec![],
+            vec!["--json", "--fields", "sha,state"],
+        ] {
+            let (host, handle) = server(vec![pull().to_string(), status.to_string()]);
+            let mut args = vec!["pr", "checks", "8"];
+            args.extend(&format);
+            let output = run(&host, &args, None);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            if format.is_empty() {
+                assert_eq!(output.stdout, b"abc123\tunknown\n");
+            } else {
+                let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(value["sha"], "abc123");
+                assert_eq!(value["state"], "unknown");
+                if format.len() == 1 {
+                    assert_eq!(value["statuses"], serde_json::json!([]));
+                }
+            }
+            let requests = handle.join().unwrap();
+            assert_eq!(requests.len(), 2);
+            assert!(requests[1].contains("/commits/abc123/status?page=1&limit=50 "));
+        }
+    }
+}
+
+#[test]
 fn checks_rejects_wrong_head_and_success_child_contradictions() {
     for status in [
         serde_json::json!({"sha":"different","state":"success","statuses":[{"context":"ci","status":"success"}]}),
         serde_json::json!({"sha":"abc123","state":"success","statuses":[{"context":"ci","status":"pending"}]}),
         serde_json::json!({"sha":"abc123","state":"success","statuses":[]}),
+        serde_json::json!({"sha":"different","state":"","statuses":null,"total_count":0}),
+        serde_json::json!({"sha":"","state":"success","statuses":null,"total_count":0}),
+        serde_json::json!({"sha":"","state":"pending","statuses":null,"total_count":0}),
+        serde_json::json!({"sha":"","state":"","statuses":[{"context":"ci","status":"success"}]}),
+        serde_json::json!({"sha":"","state":"","statuses":null}),
+        serde_json::json!({"sha":"","state":"","statuses":null,"total_count":1}),
     ] {
         let (host, handle) = server(vec![pull().to_string(), status.to_string()]);
         let output = run(&host, &["pr", "checks", "8", "--json"], None);
-        assert!(!output.status.success());
+        assert_eq!(output.status.code(), Some(7));
         assert!(output.stdout.is_empty());
         handle.join().unwrap();
     }

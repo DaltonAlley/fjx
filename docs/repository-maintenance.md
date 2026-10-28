@@ -17,8 +17,8 @@ Reviewed October 2, 2026.
 
 The release scripts came from a larger workspace. They now resolve the
 standalone repository root, and tests no longer assert the presence of missing
-parent Forgejo workflows. Forgejo-specific publication helpers are separate
-from GitHub CI; see [releasing](releasing.md).
+parent Forgejo workflows. Forgejo now has its own workflow, prepared runners on
+Dyad, and automatic version-triggered publication; see [releasing](releasing.md).
 
 ## Routine checks
 

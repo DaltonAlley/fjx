@@ -20,7 +20,7 @@ def valid-version [version: string] {
   $version =~ '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 }
 
-def version-greater [left: string, right: string] {
+export def version-greater [left: string, right: string] {
   let a = $left | split row . | each { into int }
   let b = $right | split row . | each { into int }
   if $a.0 != $b.0 { return ($a.0 > $b.0) }
@@ -163,15 +163,17 @@ export def publication-plan [expected_revision: string, actual_revision: string,
   }
 }
 
-def auth-arguments [] {
+def authenticated-git [arguments: list<string>] {
   let token = $env.FORGEJO_TOKEN? | default ""
-  if ($token | str trim) == "" { return [] }
+  if ($token | str trim) == "" { return (do { ^git ...$arguments } | complete) }
   let scope = validated-git-origin
-  [
-    -c http.followRedirects=false
-    -c $"http.($scope).followRedirects=false"
-    -c $"http.($scope).extraHeader=Authorization: token ($token)"
-  ]
+  with-env {
+    GIT_CONFIG_COUNT: '2'
+    GIT_CONFIG_KEY_0: $"http.($scope).extraHeader"
+    GIT_CONFIG_VALUE_0: ('Authorization: Basic ' + ($"x-access-token:($token)" | encode base64))
+    GIT_CONFIG_KEY_1: 'http.followRedirects'
+    GIT_CONFIG_VALUE_1: 'false'
+  } { do { ^git ...$arguments } | complete }
 }
 
 def url-origin [value: string, label: string] {
@@ -199,8 +201,9 @@ def validated-git-origin [] {
   }
   let api_origin = url-origin $api "Forgejo API URL"
   if $api_origin.scheme != "https" { fail "Git origin must use the exact HTTPS Forgejo origin before authentication" }
-  let authority = if $api_origin.port == 443 { $api_origin.host } else { $"($api_origin.host):($api_origin.port)" }
-  let scope = $"https://($authority)/"
+  let base = $api | str replace --regex '/api/v1/?$' ''
+  if $base == $api { fail "Forgejo API URL must end with /api/v1" }
+  let scope = $"($base)/"
   let expected = $"($scope)($repository).git"
   let remote = do { ^git remote get-url origin } | complete
   if $remote.exit_code != 0 or ($remote.stdout | str trim) != $expected {
@@ -209,7 +212,7 @@ def validated-git-origin [] {
   $scope
 }
 
-def release-api [method: string, path: string, --attachment: path] {
+def release-api [method: string, path: string, --attachment: path, --body: record] {
   let api = $env.FORGEJO_API_URL? | default "" | str trim
   let repository = $env.FORGEJO_REPOSITORY? | default "" | str trim
   let token = $env.FORGEJO_TOKEN? | default "" | str trim
@@ -218,10 +221,18 @@ def release-api [method: string, path: string, --attachment: path] {
     fail "Forgejo API URL must use HTTPS before authentication"
   }
   let response = mktemp
-  mut arguments = [--silent --show-error --proto '=https' --max-redirs 0 --output $response --write-out '%{http_code}' --request $method --header $"Authorization: token ($token)" --header 'Accept: application/json']
+  mut arguments = [--silent --show-error --proto '=https' --max-redirs 0 --config - --output $response --write-out '%{http_code}' --request $method --header 'Accept: application/json']
   if $attachment != null { $arguments = $arguments | append [--form $"attachment=@($attachment)"] }
+  let body_file = if $body != null {
+    let file = mktemp
+    $body | to json --raw | save --force --raw $file
+    $arguments = $arguments | append [--header 'Content-Type: application/json' --data-binary $"@($file)"]
+    $file
+  } else { null }
   let request_arguments = $arguments | append $"($api)/repos/($repository)/($path)"
-  let request = do { ^curl ...$request_arguments } | complete
+  let secret_header = 'header = ' + ($"Authorization: token ($token)" | to json --raw) + (char nl)
+  let request = do { $secret_header | ^curl ...$request_arguments } | complete
+  if $body_file != null { rm --force $body_file }
   if $request.exit_code != 0 { rm --force $response; fail $"Forgejo API request failed with exit code ($request.exit_code)" }
   {status: ($request.stdout | str trim), response: $response}
 }
@@ -248,7 +259,7 @@ def download-release-asset [asset: record, name: string] {
   let downloaded = mktemp
   let request_url = $"($api)/repos/($repository)/releases/assets/($asset_id)"
   let request = do {
-    ^curl --silent --show-error --proto '=https' --max-redirs 0 --output $downloaded --write-out '%{http_code}' --request GET --header $"Authorization: token ($token)" --header 'Accept: application/octet-stream' $request_url
+    ('header = ' + ($"Authorization: token ($token)" | to json --raw) + (char nl)) | ^curl --silent --show-error --proto '=https' --max-redirs 0 --config - --output $downloaded --write-out '%{http_code}' --request GET --header 'Accept: application/octet-stream' $request_url
   } | complete
   if $request.exit_code != 0 or ($request.stdout | str trim) != "200" {
     rm --force $downloaded
@@ -259,7 +270,7 @@ def download-release-asset [asset: record, name: string] {
 
 def inspect-remote-tags [tag: string, revision: string, version: string] {
   let prefix = 'refs/tags/fjx/v'
-  let remote = do { ^git ...(auth-arguments) ls-remote --tags origin $"($prefix)*" } | complete
+  let remote = authenticated-git [ls-remote --tags origin $"($prefix)*"]
   if $remote.exit_code != 0 { fail $"could not list fjx release tags; git ls-remote exited ($remote.exit_code)" }
   let refs = $remote.stdout | lines | each {|line|
     let fields = $line | split row --regex '\s+' | where {|field| $field != "" }
@@ -376,7 +387,7 @@ def "main validate-tag" [tag: string] {
   if $tag != $expected { fail $"tag must be ($expected)" }
 }
 def "main prepare" [bump: string, --dry-run] { prepare-version $bump --dry-run=$dry_run }
-def "main publish-plan" [expected_revision: string, source_date_epoch: string, output: path] {
+export def publication-state [expected_revision: string, source_date_epoch: string] {
   let actual_revision = (^git rev-parse HEAD | str trim)
   if $actual_revision != $expected_revision { fail $"checked-out revision ($actual_revision) does not match ($expected_revision)" }
   let version = (validate-versions)
@@ -407,7 +418,26 @@ def "main publish-plan" [expected_revision: string, source_date_epoch: string, o
   let needs_assets = true
   let complete = not ($needs_tag or $needs_release or $needs_assets)
   let plan = {publish: (not $complete), needs_tag: $needs_tag, needs_release: $needs_release, needs_assets: $needs_assets, missing_assets: ($missing_assets | str join ','), release_id: $release_id, tag: $tag, version: $version, source_date_epoch: $source_date_epoch}
-  write-output $plan $output
+  $plan
+}
+
+def "main publish-plan" [expected_revision: string, source_date_epoch: string, output: path] {
+  write-output (publication-state $expected_revision $source_date_epoch) $output
+}
+
+export def create-release [version: string, tag: string] {
+  let request = release-api POST releases --body (expected-release $version $tag)
+  if $request.status != '201' {
+    rm --force $request.response
+    fail $"Forgejo refused release creation (HTTP ($request.status)); inspect remote state before rerunning"
+  }
+  let release = try { open --raw $request.response | from json } catch {
+    rm --force $request.response
+    fail "Forgejo returned invalid JSON after creating the release; inspect remote state"
+  }
+  rm --force $request.response
+  validate-release $release $version $tag
+  $release.id
 }
 
 def "main upload-missing-assets" [release_id: int, names: string] {
@@ -429,7 +459,7 @@ def "main push-tag" [tag: string, revision: string] {
     fail "refusing to push a missing, lightweight, or wrongly targeted release tag"
   }
   if ($env.FORGEJO_TOKEN? | default "" | str trim) == "" { fail "Forgejo token is required to push a release tag" }
-  let pushed = do { ^git ...(auth-arguments) push origin $"refs/tags/($tag)" } | complete
+  let pushed = authenticated-git [push origin $"refs/tags/($tag)"]
   if $pushed.exit_code != 0 { fail "authenticated release tag push failed" }
 }
 

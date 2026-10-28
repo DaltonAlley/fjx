@@ -137,12 +137,15 @@ nix-shell --run 'nu --no-config-file scripts/check.nu'
 nix-shell --run 'cargo build --locked --release'
 ```
 
-The check script runs Cargo format, Clippy, tests, and docs, plus the repository and release
-Nushell tests and version validation. The standalone GitHub CI runs on Ubuntu
-24.04; it does not provide native Windows or macOS testing or publish binary
-releases automatically. Releases are published manually with verified archives
-and checksums. The packaging scripts support six target formats, but that is
-not a claim of native platform runtime coverage.
+The check script runs Cargo format, Clippy, tests, and docs, plus repository,
+release, and Forgejo automation tests and version validation. Forgejo checks PRs
+on a prepared Dyad runner with a five-minute timeout. A version increase merged
+or pushed to `main` triggers a separate six-target binary release after checks
+pass. Builds, archive checks, and Linux x86-64 runtime smoke checks precede
+publication; downloaded release assets must match the checked local files.
+
+GitHub CI still runs on Ubuntu 24.04 and GitHub releases remain manual. Neither
+workflow provides native Windows or macOS runtime coverage.
 
 See [release maintenance](docs/releasing.md) for version preparation, packaging,
 and the distinction between local tooling and automated publication.

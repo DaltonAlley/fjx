@@ -1,10 +1,68 @@
 # Release maintenance
 
-The source version is 0.3.1. GitHub binary releases are published manually;
-this repository does not publish assets automatically or publish to crates.io
-(`publish = false`). GitHub CI checks the project on Ubuntu 24.04, not native
-Windows or macOS. Packaging helpers are tooling, not evidence that a particular
-release or platform was tested or published.
+Forgejo publishes binary releases automatically when the version increases on
+`main` and checks pass on that exact commit. GitHub releases remain manual.
+The crate is not published to crates.io (`publish = false`). Neither CI workflow
+provides native Windows or macOS testing.
+
+## Automatic Forgejo releases
+
+[The Forgejo workflow](../.forgejo/workflows/ci.yaml) runs the complete check
+script on PRs, pushes to `main`, and manual checks. PR jobs have a five-minute
+timeout and use a prepared image on Dyad. The image includes the pinned Rust
+and Nushell tools and a precompiled dependency cache. Each job writes to its own
+container layer; there is no shared writable Cargo cache or container socket.
+New dependencies may require rebuilding the image to retain the timing target.
+
+Use the version preparation commands below, commit all three version files,
+and merge or push to Forgejo `main`. The workflow compares `release.toml` before
+and after the push. An unchanged version skips publication; decreases and
+inconsistent version files fail. Initial repository imports do not publish.
+
+The release job has a separate runner slot and a 45-minute timeout. It builds
+all six targets from `release-targets.toml` with the pinned cargo-zigbuild image,
+using the source commit timestamp for archive metadata. It verifies binary
+formats, archive inventory, executable modes, and checksums, and runs the two
+x86-64 Linux binaries with `--version`. ARM64 Linux, Windows, and macOS receive
+static format validation in this workflow; the optional full local smoke
+pipeline below is separate.
+
+Only after local verification does the job create the annotated `fjx/vVERSION`
+tag and Forgejo release and upload the twelve archive/checksum assets. It then
+downloads the attachments and compares their bytes to the verified local files.
+The built-in repository job token supplies authentication; no PAT secret is
+needed. Main runs are serialized and are not canceled by later pushes.
+
+If publication fails, inspect the tag, release, and asset state before rerunning
+the original workflow. The helpers preserve matching tags, reject mismatched
+tags or unexpected metadata/assets, and upload only missing attachments. Writes
+are never retried automatically. A completed run verifies existing attachments
+again; it does not overwrite them. A manual workflow dispatch runs checks only.
+
+### Maintain the Dyad runners
+
+[ci/Containerfile](../ci/Containerfile) owns the prepared image;
+[ci/runner.nix](../ci/runner.nix) packages the installer and runner executable.
+Install under Dalton's lingering user account on Dyad. The installer declares
+two persistent user services, scoped to `dalton/fjx`, using the existing
+`forgejo-pr-podman.service` socket. Job containers are unprivileged, have no
+host mounts or socket, and have bounded CPU and memory use. Runtime credentials
+live in private `~/.local/state/fjx-runner/{ci,release}/.runner` files.
+
+On Dyad, from a clean checkout, build the image through that rootless service:
+
+```sh
+podman --remote --url "unix://${XDG_RUNTIME_DIR}/forgejo-pr-podman/podman.sock" \
+  build -f ci/Containerfile -t localhost/fjx-ci:prepared .
+```
+
+Build `ci/runner.nix` with the host's nixpkgs (Forgejo Runner 13.2 or newer),
+retaining the output through a profile or persistent out-link. Supply its
+`fjx-install-runner` command with the immutable local `sha256:` image ID and a
+private JSON file containing the result of `fjx api
+/repos/dalton/fjx/actions/runners/registration-token --json`. The installer
+consumes and deletes that file and reuses existing runner identities on image
+updates. Never commit credentials or put them in the image/build context.
 
 ## Prepare a version
 
@@ -39,8 +97,8 @@ Tags use `fjx/vVERSION`, for example `fjx/v0.3.1`. Validate a proposed tag with:
 nu --no-config-file scripts/release.nu validate-tag fjx/v0.3.1
 ```
 
-Do not push tags or publish assets until the intended remote and release process
-have been reviewed.
+For Forgejo, let the workflow create the release tag. For manual publication,
+review the intended remote before pushing a tag.
 
 ## Package locally
 
@@ -132,7 +190,6 @@ require `FORGEJO_API_URL`, `FORGEJO_REPOSITORY`, and `FORGEJO_TOKEN` in the
 publication environment. They are not a GitHub Releases integration and must
 not be pointed at GitHub as though the APIs were interchangeable.
 
-Before adding automated publication, review authentication, tag protection,
-asset provenance, permissions, and platform coverage using the
-[repository maintenance checklist](repository-maintenance.md). Keep credentials
+The workflow uses these helpers through `scripts/forgejo-ci.nu`. They support
+Forgejo instances hosted below a URL path such as `/forgejo`. Keep credentials
 out of logs and command examples, and never retry a write blindly.

@@ -367,7 +367,8 @@ def test-release-metadata-mutations [] {
   [
     '#!/usr/bin/env -S nu --no-config-file'
     'def --wrapped main [...args: string] {'
-    '  if ($args | take 3) == [remote get-url origin] { print "https://forge.example/dalton/monolith.git"; return }'
+    '  if ($args | take 3) == [remote get-url origin] { print ($env.FAKE_GIT_URL? | default "https://forge.example/dalton/monolith.git"); return }'
+    '  if $args.0 == "ls-remote" and ($env.GIT_CONFIG_KEY_0? | default "") !~ "^http.https://forge.example/(forgejo/)?[.]extraHeader$" { error make {msg: "missing scoped Git authentication"} }'
     '  if ($args | first) == "rev-parse" { print $env.FAKE_REVISION; return }'
     '  print "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb refs/tags/fjx/v1.2.3"'
     '  print $"($env.FAKE_REVISION) refs/tags/fjx/v1.2.3^{}"'
@@ -435,7 +436,8 @@ def test-authenticated-release-origin [] {
   [
     '#!/usr/bin/env -S nu --no-config-file'
     'def --wrapped main [...args: string] {'
-    '  if ($args | take 3) == [remote get-url origin] { print "https://forge.example/dalton/monolith.git"; return }'
+    '  if ($args | take 3) == [remote get-url origin] { print ($env.FAKE_GIT_URL? | default "https://forge.example/dalton/monolith.git"); return }'
+    '  if $args.0 == "ls-remote" and ($env.GIT_CONFIG_KEY_0? | default "") !~ "^http.https://forge.example/(forgejo/)?[.]extraHeader$" { error make {msg: "missing scoped Git authentication"} }'
     '  print "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb refs/tags/fjx/v1.2.3"'
     '  print $"($env.FAKE_REVISION) refs/tags/fjx/v1.2.3^{}"'
     '}'
@@ -483,6 +485,14 @@ def test-authenticated-release-origin [] {
   let calls = open --raw $curl_log
   check ($calls | str contains 'https://forge.example/api/v1/repos/dalton/monolith/releases/assets/101') "asset bytes were not fetched through the verified Forgejo asset ID endpoint"
   check (not ($calls | str contains '"--location"')) "authenticated asset downloads permit redirects"
+  check (not ($calls | str contains 'origin-fixture-secret')) 'token must not appear in curl arguments'
+
+  let subpath = run-release $root [verify-final 1.2.3 $revision fjx/v1.2.3] ($environment | merge {
+    FORGEJO_API_URL: 'https://forge.example/forgejo/api/v1'
+    FAKE_GIT_URL: 'https://forge.example/forgejo/dalton/monolith.git'
+    FAKE_RELEASE_STATE: valid
+  })
+  check ($subpath.exit_code == 0) $"Forgejo subpath publication failed: ($subpath.stderr)"
 
   for state in [foreign http-asset redirect missing-id invalid-id] {
     '' | save --force --raw $curl_log
@@ -562,7 +572,7 @@ def test-release-build-contract [] {
   check (($asset_verifications | length) == 1) "release driver must verify exported assets exactly once"
   check ((($asset_verifications | first) | str trim) == 'verify-assets $asset_dir $version --runtime=$runtime --wine=$wine --smoke') "release driver must smoke the complete six-target asset set"
   let release_driver = open --raw $release_script
-  for required in ['def "main push-tag"' '^git remote get-url origin' 'http.followRedirects=false' 'git cat-file -t' 'Forgejo token is required to push a release tag' 'def "main upload-missing-assets"' 'def "main verify-final"' 'must be greater than prior released version' 'browser_download_url' 'releases/assets/($asset_id)' "--proto '=https' --max-redirs 0" 'cmp --silent' 'does not match the locally checked output' 'draft: false' 'prerelease: false'] {
+  for required in ['def "main push-tag"' '^git remote get-url origin' "GIT_CONFIG_KEY_1: 'http.followRedirects'" 'git cat-file -t' 'Forgejo token is required to push a release tag' 'def "main upload-missing-assets"' 'def "main verify-final"' 'must be greater than prior released version' 'browser_download_url' 'releases/assets/($asset_id)' "--proto '=https' --max-redirs 0" 'cmp --silent' 'does not match the locally checked output' 'draft: false' 'prerelease: false'] {
     check ($release_driver | str contains $required) $"release publication boundary lacks: ($required)"
   }
   let version = (open --raw $release_toml | from toml | get version)

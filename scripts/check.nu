@@ -32,6 +32,7 @@ def main [] {
   }
   run-check $nu.current-exe [--no-config-file tests/repository.nu]
   run-check $nu.current-exe [--no-config-file tests/release.nu]
+  run-check $nu.current-exe [--no-config-file tests/forgejo-ci.nu]
   run-check $nu.current-exe [--no-config-file scripts/release.nu validate]
   print 'All fjx checks passed.'
 }

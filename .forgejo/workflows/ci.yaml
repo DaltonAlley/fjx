@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: fjx-${{ forgejo.ref }}
+  cancel-in-progress: ${{ forgejo.ref != 'refs/heads/main' }}
+
+jobs:
+  checks:
+    name: Rust and Nushell checks
+    runs-on: fjx-ci
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      # No setup downloads or shared writable caches. The runner image has the
+      # pinned tools and a dependency build cache, copied on write for each job.
+      - name: Check out the exact commit
+        env:
+          CHECKOUT_URL: ${{ forgejo.server_url }}/${{ forgejo.repository }}.git
+          CHECKOUT_SHA: ${{ forgejo.sha }}
+        run: |
+          set -eu
+          git init .
+          git remote add origin "$CHECKOUT_URL"
+          authorization="$(printf 'x-access-token:%s' "$FORGEJO_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=2 \
+            GIT_CONFIG_KEY_0="http.${CHECKOUT_URL}.extraheader" \
+            GIT_CONFIG_VALUE_0="Authorization: Basic ${authorization}" \
+            GIT_CONFIG_KEY_1=http.followRedirects GIT_CONFIG_VALUE_1=false \
+            git fetch --no-tags origin "$CHECKOUT_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
+
+      - name: Run all checks
+        run: nu --no-config-file scripts/check.nu
+
+      - name: Check for a version bump
+        id: version
+        if: forgejo.event_name == 'push' && forgejo.ref == 'refs/heads/main'
+        env:
+          BEFORE_SHA: ${{ forgejo.event.before }}
+          CHECKOUT_SHA: ${{ forgejo.sha }}
+        run: nu --no-config-file scripts/forgejo-ci.nu candidate "$BEFORE_SHA" "$CHECKOUT_SHA" "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and publish release
+    needs: checks
+    if: forgejo.event_name == 'push' && forgejo.ref == 'refs/heads/main' && needs.checks.outputs.release == 'true'
+    runs-on: fjx-release
+    timeout-minutes: 45
+    steps:
+      - name: Check out the checked commit
+        env:
+          CHECKOUT_URL: ${{ forgejo.server_url }}/${{ forgejo.repository }}.git
+          CHECKOUT_SHA: ${{ forgejo.sha }}
+        run: |
+          set -eu
+          git init .
+          git remote add origin "$CHECKOUT_URL"
+          authorization="$(printf 'x-access-token:%s' "$FORGEJO_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=2 \
+            GIT_CONFIG_KEY_0="http.${CHECKOUT_URL}.extraheader" \
+            GIT_CONFIG_VALUE_0="Authorization: Basic ${authorization}" \
+            GIT_CONFIG_KEY_1=http.followRedirects GIT_CONFIG_VALUE_1=false \
+            git fetch --no-tags origin "$CHECKOUT_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
+
+      - name: Build, verify, and publish all six targets
+        env:
+          FORGEJO_API_URL: ${{ forgejo.api_url }}
+          FORGEJO_REPOSITORY: ${{ forgejo.repository }}
+          CHECKOUT_SHA: ${{ forgejo.sha }}
+        run: nu --no-config-file scripts/forgejo-ci.nu publish "$CHECKOUT_SHA"

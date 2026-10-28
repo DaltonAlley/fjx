@@ -1,6 +1,6 @@
 # fjx
 
-`fjx` is a small synchronous Forgejo client for people and scripts. Version 0.3.1 targets Forgejo 15.0.7.
+`fjx` is a small synchronous Forgejo client for people and scripts. Version 0.3.2 targets Forgejo 15.0.7.
 Manage issues, pull requests, action runs, and releases from your terminal, with
 stable plain output and compact JSON for automation.
 
@@ -9,7 +9,7 @@ stable plain output and compact JSON for automation.
 Install Git and Rust 1.97.1, pinned in [rust-toolchain.toml](rust-toolchain.toml).
 
 ```sh
-git clone https://github.com/DaltonAlley/fjx.git
+git clone https://dyad.tail77425.ts.net/forgejo/dalton/fjx.git
 cd fjx
 cargo install --path . --locked
 fjx --version
@@ -18,6 +18,8 @@ fjx --version
 Make sure Cargo's binary directory, normally `$HOME/.cargo/bin`, is on `PATH`.
 The crate has `publish = false`, so it is not published to crates.io. Binary
 archives and SHA-256 checksums are available from
+[Forgejo Releases](https://dyad.tail77425.ts.net/forgejo/dalton/fjx/releases).
+Earlier GitHub releases remain available from
 [GitHub Releases](https://github.com/DaltonAlley/fjx/releases). To build without
 installing, run `cargo build --locked --release` and use `target/release/fjx`
 (`fjx.exe` on Windows).

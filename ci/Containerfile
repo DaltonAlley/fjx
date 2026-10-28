@@ -1,0 +1,24 @@
+# Prepare this image on Dyad, outside the five-minute PR path.
+FROM ghcr.io/rust-cross/cargo-zigbuild:0.23.3@sha256:76ed3823d8cd9d8b409b10f9c4cda292b0c8699175ea4c0a2d541775c8184d2b
+
+RUN apt-get update && apt-get install --no-install-recommends --yes \
+      ca-certificates curl git util-linux zip unzip file \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --fail --silent --show-error --location \
+      https://github.com/nushell/nushell/releases/download/0.112.2/nu-0.112.2-x86_64-unknown-linux-musl.tar.gz \
+      --output /tmp/nu.tar.gz \
+    && echo 'd9c0ba0938beed6148c8a354c45612c0979d7a787794b8dd13e866ca3b571375  /tmp/nu.tar.gz' | sha256sum --check --strict \
+    && tar -xzf /tmp/nu.tar.gz --strip-components=1 -C /usr/local/bin nu-0.112.2-x86_64-unknown-linux-musl/nu \
+    && rm /tmp/nu.tar.gz
+RUN rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt \
+    && rustup default 1.97.1 \
+    && rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
+      x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin x86_64-pc-windows-gnu
+
+ENV CARGO_TARGET_DIR=/opt/fjx-target CARGO_TERM_COLOR=always
+WORKDIR /opt/fjx-seed
+COPY . .
+RUN cargo clippy --locked --all-targets -- -D warnings \
+    && cargo test --locked --all-targets --no-run \
+    && RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps
+WORKDIR /workspace

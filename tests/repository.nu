@@ -75,10 +75,33 @@ def test-documentation-links [] {
   }
 }
 
+def test-forgejo-ci-contract [] {
+  let workflow = open .forgejo/workflows/ci.yaml
+  let events = $workflow.on | columns
+  check ('pull_request' in $events and 'push' in $events) 'Forgejo must check PRs and main'
+  check (not ('pull_request_target' in $events)) 'Forgejo must not use privileged PR execution'
+  check ($workflow.on.push.branches == [main]) 'Forgejo push checks must target main'
+  let checks = $workflow.jobs.checks
+  check ($checks.timeout-minutes == 5) 'PR checks must have a five-minute budget'
+  check ($checks.runs-on == fjx-ci) 'checks must use the prepared runner'
+  check ($checks.steps | any {|step| ($step.run? | default '') == 'nu --no-config-file scripts/check.nu' }) 'Forgejo must run the complete check entry point'
+  let release = $workflow.jobs.release
+  check ($release.needs == checks) 'release publication must wait for checks'
+  check ($release.runs-on != $checks.runs-on) 'release builds must have a separate runner slot'
+  for condition in ["forgejo.event_name == 'push'" "forgejo.ref == 'refs/heads/main'" "needs.checks.outputs.release == 'true'"] {
+    check ($release.if | str contains $condition) 'release must require a checked main version bump'
+  }
+  check ($workflow.concurrency.cancel-in-progress == "${{ forgejo.ref != 'refs/heads/main' }}") 'main publication must not be canceled by later pushes'
+  let text = open --raw .forgejo/workflows/ci.yaml
+  check (not ($text | str contains 'secrets.')) 'Forgejo CI must not require repository PAT secrets'
+  check (not ($text | str contains 'apt-get')) 'tool installation must stay outside PR jobs'
+}
+
 def main [] {
   cd $project_dir
   test-package-contract
   test-ci-contract
+  test-forgejo-ci-contract
   test-documentation-links
   print 'repository checks passed'
 }

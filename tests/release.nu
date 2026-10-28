@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-use ../scripts/release.nu [publication-plan]
+use ../scripts/release.nu [publication-plan create-release]
 use ../scripts/package-release.nu [release-targets]
 use ../scripts/release-smoke.nu [run-arm64-smoke-container]
 
@@ -367,7 +367,8 @@ def test-release-metadata-mutations [] {
   [
     '#!/usr/bin/env -S nu --no-config-file'
     'def --wrapped main [...args: string] {'
-    '  if ($args | take 3) == [remote get-url origin] { print "https://forge.example/dalton/monolith.git"; return }'
+    '  if ($args | take 3) == [remote get-url origin] { print ($env.FAKE_GIT_URL? | default "https://forge.example/dalton/monolith.git"); return }'
+    '  if $args.0 == "ls-remote" and ($env.GIT_CONFIG_KEY_0? | default "") !~ "^http.https://forge.example/(forgejo/)?[.]extraHeader$" { error make {msg: "missing scoped Git authentication"} }'
     '  if ($args | first) == "rev-parse" { print $env.FAKE_REVISION; return }'
     '  print "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb refs/tags/fjx/v1.2.3"'
     '  print $"($env.FAKE_REVISION) refs/tags/fjx/v1.2.3^{}"'
@@ -415,9 +416,6 @@ def test-authenticated-release-origin [] {
   let foreign_log = $root | path join foreign.log
   let expected_names = (expected-asset-names 1.2.3)
   let names_literal = ($expected_names | each {|name| $'"($name)"' } | str join ' ')
-  let name_map = ($expected_names | enumerate | reduce --fold {} {|entry, map|
-    $map | insert (($entry.index + 101) | into string) $entry.item
-  } | to json --raw)
   mkdir $assets $payload $fake_bin
   touch $curl_log $foreign_log
   '#!/usr/bin/env nu\nprint fixture\n' | save --raw ($payload | path join fjx)
@@ -435,7 +433,8 @@ def test-authenticated-release-origin [] {
   [
     '#!/usr/bin/env -S nu --no-config-file'
     'def --wrapped main [...args: string] {'
-    '  if ($args | take 3) == [remote get-url origin] { print "https://forge.example/dalton/monolith.git"; return }'
+    '  if ($args | take 3) == [remote get-url origin] { print ($env.FAKE_GIT_URL? | default "https://forge.example/dalton/monolith.git"); return }'
+    '  if $args.0 == "ls-remote" and ($env.GIT_CONFIG_KEY_0? | default "") !~ "^http.https://forge.example/(forgejo/)?[.]extraHeader$" { error make {msg: "missing scoped Git authentication"} }'
     '  print "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb refs/tags/fjx/v1.2.3"'
     '  print $"($env.FAKE_REVISION) refs/tags/fjx/v1.2.3^{}"'
     '}'
@@ -448,17 +447,17 @@ def test-authenticated-release-origin [] {
     '  let output = $args | get ($output_index + 1)'
     '  let target = $args | last'
     '  if ($target | str contains "evil.example") and ($args | str join " " | str contains "Authorization: token") { "token disclosed" | save --append --raw $env.FAKE_FOREIGN_LOG }'
-    '  if $target =~ "/releases/assets/[0-9]+$" {'
+    '  if $target =~ "/releases/download/fjx%2Fv1[.]2[.]3/" {'
     '    if $env.FAKE_RELEASE_STATE == "redirect" { "redirect" | save --raw $output; print --no-newline 302; return }'
-    $"    let names = '($name_map)' | from json"
-    '    cp ($env.FAKE_ASSET_ROOT | path join ($names | get ($target | path basename))) $output'
+    '    cp ($env.FAKE_ASSET_ROOT | path join ($target | path basename)) $output'
     '    print --no-newline 200'
     '    return'
     '  }'
     $'  let names = [($names_literal)]'
-    '  let origin = match $env.FAKE_RELEASE_STATE { "foreign" => "https://evil.example", "http-asset" => "http://forge.example", _ => "https://forge.example" }'
+    '  let origin = match $env.FAKE_RELEASE_STATE { "foreign" => "https://evil.example", "http-asset" => "http://forge.example", _ => ($env.FORGEJO_API_URL | str replace /api/v1 "") }'
+    '  let repo = if $env.FAKE_RELEASE_STATE == "foreign-path" { "dalton/other" } else { "dalton/monolith" }'
     '  let assets = $names | enumerate | each {|entry|'
-    '    let base = {name: $entry.item, browser_download_url: $"($origin)/assets/($entry.item)"}'
+    '    let base = {name: $entry.item, browser_download_url: $"($origin)/($repo)/releases/download/fjx%2Fv1.2.3/($entry.item)"}'
     '    if $env.FAKE_RELEASE_STATE == "missing-id" and $entry.index == 0 { $base } else { $base | merge {id: (if $env.FAKE_RELEASE_STATE == "invalid-id" and $entry.index == 0 { 0 } else { $entry.index + 101 })} }'
     '  }'
     '  {id: 42, tag_name: "fjx/v1.2.3", name: "fjx (1.2.3)", body: "", draft: false, prerelease: false, assets: $assets} | to json | save --force --raw $output'
@@ -481,10 +480,19 @@ def test-authenticated-release-origin [] {
   let valid = run-release $root [verify-final 1.2.3 $revision fjx/v1.2.3] ($environment | merge {FAKE_RELEASE_STATE: valid})
   check ($valid.exit_code == 0) $"exact same-origin assets failed verification: ($valid.stderr)"
   let calls = open --raw $curl_log
-  check ($calls | str contains 'https://forge.example/api/v1/repos/dalton/monolith/releases/assets/101') "asset bytes were not fetched through the verified Forgejo asset ID endpoint"
+  check ($calls | str contains 'https://forge.example/dalton/monolith/releases/download/fjx%2Fv1.2.3/') 'asset bytes must use the verified Forgejo release download URL'
+  check (not ($calls | str contains '/releases/assets/')) 'Forgejo must not use a GitHub-only asset endpoint'
   check (not ($calls | str contains '"--location"')) "authenticated asset downloads permit redirects"
+  check (not ($calls | str contains 'origin-fixture-secret')) 'token must not appear in curl arguments'
 
-  for state in [foreign http-asset redirect missing-id invalid-id] {
+  let subpath = run-release $root [verify-final 1.2.3 $revision fjx/v1.2.3] ($environment | merge {
+    FORGEJO_API_URL: 'https://forge.example/forgejo/api/v1'
+    FAKE_GIT_URL: 'https://forge.example/forgejo/dalton/monolith.git'
+    FAKE_RELEASE_STATE: valid
+  })
+  check ($subpath.exit_code == 0) $"Forgejo subpath publication failed: ($subpath.stderr)"
+
+  for state in [foreign foreign-path http-asset redirect missing-id invalid-id] {
     '' | save --force --raw $curl_log
     '' | save --force --raw $foreign_log
     let result = run-release $root [verify-final 1.2.3 $revision fjx/v1.2.3] ($environment | merge {FAKE_RELEASE_STATE: $state})
@@ -495,7 +503,7 @@ def test-authenticated-release-origin [] {
     check (not ($unsafe_calls | str contains 'http://forge.example/assets')) $"authenticated request reached an HTTP asset URL for ($state)"
     check ((open --raw $foreign_log) == '') $"token reached a foreign origin for ($state)"
     if $state == redirect {
-      check ($unsafe_calls | str contains '/releases/assets/101') "redirect fixture did not reach the same-origin asset endpoint"
+      check ($unsafe_calls | str contains '/releases/download/fjx%2Fv1.2.3/') 'redirect fixture must reach the verified release download endpoint'
       check (not ($unsafe_calls | str contains '"--location"')) "redirect fixture was followed with authentication"
     }
   }
@@ -508,6 +516,52 @@ def test-authenticated-release-origin [] {
     check (not ($result.stderr | str contains 'origin-fixture-secret')) $"token appeared in unsafe API URL failure: ($api)"
   }
   rm -rf $root
+}
+
+def test-create-release [] {
+  let root = mktemp -d
+  let tool = $root | path join curl
+  let calls = $root | path join calls
+  [
+    '#!/usr/bin/env -S nu --no-config-file'
+    'def --wrapped main [...args: string] {'
+    '  "request\n" | save --append --raw $env.FAKE_CREATE_CALLS'
+    '  let header = open --raw /dev/stdin'
+    '  if not ($header | str contains "Authorization: token fixture-create") { exit 9 }'
+    '  if ($args | str join " " | str contains "fixture-create") { exit 9 }'
+    '  if ($args | last) != "https://forge.example/forgejo/api/v1/repos/dalton/fjx/releases" { exit 9 }'
+    '  let body_index = $args | enumerate | where item == "--data-binary" | first | get index'
+    '  let body_path = $args | get ($body_index + 1) | str substring 1..'
+    '  let body = open --raw $body_path | from json'
+    '  if $body != {tag_name: "fjx/v1.2.3", name: "fjx (1.2.3)", body: "", draft: false, prerelease: false} { exit 9 }'
+    '  let output_index = $args | enumerate | where item == "--output" | first | get index'
+    '  $body | insert id 42 | to json | save --force --raw ($args | get ($output_index + 1))'
+    '  print --no-newline $env.FAKE_CREATE_STATUS'
+    '}'
+  ] | str join (char nl) | save --raw $tool
+  chmod 0755 $tool
+  try {
+    with-env {
+      PATH: ($env.PATH | prepend $root)
+      FORGEJO_API_URL: 'https://forge.example/forgejo/api/v1'
+      FORGEJO_REPOSITORY: 'dalton/fjx'
+      FORGEJO_TOKEN: fixture-create
+      FAKE_CREATE_CALLS: $calls
+      FAKE_CREATE_STATUS: '201'
+    } {
+      check ((create-release 1.2.3 fjx/v1.2.3) == 42) 'release creation must return its verified ID'
+      '' | save --force --raw $calls
+      let rejected = with-env {FAKE_CREATE_STATUS: '503'} {
+        try { create-release 1.2.3 fjx/v1.2.3 | ignore; false } catch { true }
+      }
+      check $rejected 'failed release creation must stop publication'
+      check (((open --raw $calls) | lines | length) == 1) 'release creation must never retry a write'
+    }
+  } catch {|error|
+    rm --recursive --force $root
+    error make $error.raw
+  }
+  rm --recursive --force $root
 }
 
 def test-release-build-contract [] {
@@ -562,7 +616,7 @@ def test-release-build-contract [] {
   check (($asset_verifications | length) == 1) "release driver must verify exported assets exactly once"
   check ((($asset_verifications | first) | str trim) == 'verify-assets $asset_dir $version --runtime=$runtime --wine=$wine --smoke') "release driver must smoke the complete six-target asset set"
   let release_driver = open --raw $release_script
-  for required in ['def "main push-tag"' '^git remote get-url origin' 'http.followRedirects=false' 'git cat-file -t' 'Forgejo token is required to push a release tag' 'def "main upload-missing-assets"' 'def "main verify-final"' 'must be greater than prior released version' 'browser_download_url' 'releases/assets/($asset_id)' "--proto '=https' --max-redirs 0" 'cmp --silent' 'does not match the locally checked output' 'draft: false' 'prerelease: false'] {
+  for required in ['def "main push-tag"' '^git remote get-url origin' "GIT_CONFIG_KEY_1: 'http.followRedirects'" 'git cat-file -t' 'Forgejo token is required to push a release tag' 'def "main upload-missing-assets"' 'def "main verify-final"' 'must be greater than prior released version' 'browser_download_url' 'releases/download/($tag)/($name)' "--proto '=https' --max-redirs 0" 'cmp --silent' 'does not match the locally checked output' 'draft: false' 'prerelease: false'] {
     check ($release_driver | str contains $required) $"release publication boundary lacks: ($required)"
   }
   let version = (open --raw $release_toml | from toml | get version)
@@ -613,6 +667,7 @@ test-smoke-requires-wine
 test-publish-planning
 test-release-metadata-mutations
 test-authenticated-release-origin
+test-create-release
 test-release-build-contract
 test-ci-build-arguments
 print 'fjx release tests passed'

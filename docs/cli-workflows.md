@@ -103,7 +103,9 @@ Creation accepts repeated `--label`, `--label-id`, and `--assignee` flags, plus
 `--milestone NAME` or `--milestone-id ID`. Editing accepts repeated
 `--add-label`, `--remove-label`, `--add-label-id`, `--remove-label-id`,
 `--add-assignee`, and `--remove-assignee`, plus title/body and milestone changes.
-Only PR edits accept `--base`. Empty bodies can clear the description. Use
+Only PR edits accept `--base`. When `pr create` omits `--base`, fjx reads the
+repository's default branch and sends it as `base`; a dry run makes the same read
+and shows the resolved branch. Empty bodies can clear the description. Use
 `--clear-milestone` to remove a milestone. Set/clear conflicts, opposing changes to
 the same resolved label/assignee, and empty edits are rejected.
 

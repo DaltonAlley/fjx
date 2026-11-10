@@ -280,8 +280,7 @@ struct CreatePull<'a> {
     metadata: serde_json::Value,
     head: &'a str,
     title: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    base: Option<&'a str>,
+    base: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     body: Option<&'a str>,
 }
@@ -565,8 +564,18 @@ fn create(
     // pull request as a draft during the same create request.
     let draft_title = draft.then(|| format!("WIP: {title}"));
     let repo = RepoClient::resolve(common)?;
+    let metadata = super::triage::resolve_metadata(&repo, metadata)?;
+    // Forgejo rejects a create request without a base, so resolve the documented
+    // default with a read request, including during dry-run.
+    let default_base;
+    let base = if let Some(base) = base {
+        base
+    } else {
+        default_base = repo.default_branch()?;
+        default_base.as_str()
+    };
     let payload = CreatePull {
-        metadata: super::triage::resolve_metadata(&repo, metadata)?,
+        metadata,
         head,
         title: draft_title.as_deref().unwrap_or(title),
         base,

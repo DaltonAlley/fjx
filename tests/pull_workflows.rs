@@ -37,17 +37,27 @@ fn request(stream: &mut TcpStream) -> String {
 }
 
 fn server(bodies: Vec<String>) -> (String, thread::JoinHandle<Vec<String>>) {
+    server_with_status(bodies.into_iter().map(|body| ("200 OK", body)).collect())
+}
+
+fn server_with_status(
+    responses: Vec<(&'static str, String)>,
+) -> (String, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let handle = thread::spawn(move || {
-        bodies.into_iter().map(|body| {
+        responses.into_iter().map(|(status, body)| {
         let (mut stream, _) = listener.accept().unwrap();
         let request = request(&mut stream);
-        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
         request
     }).collect()
     });
     (format!("http://{address}"), handle)
+}
+
+fn request_body(request: &str) -> serde_json::Value {
+    serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap()
 }
 
 fn run(host: &str, args: &[&str], input: Option<&str>) -> Output {
@@ -421,6 +431,8 @@ fn create_metadata_and_edit_base_use_pull_endpoints() {
             "feature",
             "--title",
             "change",
+            "--base",
+            "stable",
             "--label-id",
             "4",
             "--milestone-id",
@@ -442,6 +454,7 @@ fn create_metadata_and_edit_base_use_pull_endpoints() {
     assert_eq!(body["labels"], serde_json::json!([4]));
     assert_eq!(body["milestone"], 2);
     assert_eq!(body["assignees"], serde_json::json!(["alice"]));
+    assert_eq!(body["base"], "stable");
     let (host, handle) = server(vec!["{}".into()]);
     let output = run(
         &host,
@@ -547,4 +560,100 @@ fn comments_all_collects_pages_and_later_failure_emits_nothing() {
         assert!(requests[0].contains("page=1&limit=1"));
         assert!(requests[1].contains("page=2&limit=1"));
     }
+}
+
+#[test]
+fn create_without_base_sends_repository_default_branch() {
+    let repository = r#"{"default_branch":"trunk"}"#;
+    for dry_run in [true, false] {
+        let mut responses = vec![repository.to_owned()];
+        if !dry_run {
+            responses.push(pull().to_string());
+        }
+        let (host, handle) = server(responses);
+        let mut args = vec![
+            "pr", "create", "--head", "feature", "--title", "change", "--draft", "--json",
+        ];
+        if dry_run {
+            args.push("--dry-run");
+        }
+        let output = run(&host, &args, None);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let requests = handle.join().unwrap();
+        assert!(requests[0].starts_with("GET /api/v1/repos/owner/repo "));
+        let body = if dry_run {
+            assert_eq!(requests.len(), 1);
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(value["method"], "POST");
+            value["body"].clone()
+        } else {
+            assert_eq!(requests.len(), 2);
+            assert!(requests[1].starts_with("POST /api/v1/repos/owner/repo/pulls "));
+            request_body(&requests[1])
+        };
+        assert_eq!(
+            body,
+            serde_json::json!({"base":"trunk","head":"feature","title":"WIP: change"})
+        );
+    }
+}
+
+#[test]
+fn create_without_base_fails_before_write_when_default_branch_is_unavailable() {
+    for (status, repository) in [
+        ("200 OK", r#"{"default_branch":""}"#),
+        ("200 OK", r#"{"name":"repo"}"#),
+        ("404 Not Found", r#"{"message":"repo not found"}"#),
+    ] {
+        let (host, handle) = server_with_status(vec![(status, repository.to_owned())]);
+        let output = run(
+            &host,
+            &["pr", "create", "--head", "feature", "--title", "change"],
+            None,
+        );
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert_eq!(handle.join().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn api_errors_include_bounded_sanitized_forgejo_message() {
+    let (host, handle) = server_with_status(vec![(
+        "422 Unprocessable Entity",
+        r#"{"message":"Invalid PullRequest: base\u001b[2J is required\n","url":"https://forgejo.example/api/swagger"}"#
+            .to_owned(),
+    )]);
+    let output = run(
+        &host,
+        &[
+            "pr", "create", "--head", "feature", "--title", "change", "--base", "main",
+        ],
+        None,
+    );
+    assert_eq!(output.status.code(), Some(5));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr
+            .contains("Forgejo returned HTTP 422: Invalid PullRequest: base\\u{1B}[2J is required"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains('\u{1b}'));
+    assert!(!stderr.contains("test-token"));
+    handle.join().unwrap();
+
+    let (host, handle) = server_with_status(vec![("422 Unprocessable Entity", "[]".to_owned())]);
+    let output = run(&host, &["pr", "close", "8"], None);
+    assert_eq!(output.status.code(), Some(5));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .ends_with("Forgejo returned HTTP 422\n")
+    );
+    handle.join().unwrap();
 }

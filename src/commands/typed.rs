@@ -84,6 +84,21 @@ impl RepoClient {
         )
     }
 
+    /// Read the repository's default branch, which Forgejo requires as an
+    /// explicit pull-request base.
+    pub(crate) fn default_branch(&self) -> Result<String, Error> {
+        #[derive(serde::Deserialize)]
+        struct Repository {
+            default_branch: String,
+        }
+        let relative = format!("repos/{}/{}", self.owner, self.repo);
+        let (repository, _) = self.get::<Repository>(&relative, "repository")?;
+        if repository.default_branch.is_empty() {
+            return Err(Error::data("Forgejo returned an empty default branch"));
+        }
+        Ok(repository.default_branch)
+    }
+
     pub(crate) fn get<T: DeserializeOwned>(
         &self,
         relative: &str,

@@ -892,6 +892,8 @@ fn pull_draft_review_merge_and_checks_use_forgejo_15_payloads() {
             "feature",
             "--title",
             "change",
+            "--base",
+            "main",
             "--draft",
             "--dry-run",
             "--json",
@@ -909,10 +911,9 @@ fn pull_draft_review_merge_and_checks_use_forgejo_15_payloads() {
         "{}",
         String::from_utf8_lossy(&dry.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&dry.stdout)
-            .ends_with("\"body\":{\"head\":\"feature\",\"title\":\"WIP: change\"}}\n")
-    );
+    assert!(String::from_utf8_lossy(&dry.stdout).ends_with(
+        "\"body\":{\"base\":\"main\",\"head\":\"feature\",\"title\":\"WIP: change\"}}\n"
+    ));
 
     let review = command()
         .args([

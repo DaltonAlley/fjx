@@ -1,8 +1,53 @@
 # fjx
 
-`fjx` is a small synchronous Forgejo client for people and scripts. Version 0.3.2 targets Forgejo 15.0.7.
-Manage issues, pull requests, action runs, and releases from your terminal, with
-stable plain output and compact JSON for automation.
+`fjx` is a small synchronous, single-binary Forgejo client for people and scripts.
+It provides stable output, private token storage, and HTTP requests that refuse
+redirects. Version 0.3.2 targets Forgejo 15.0.7.
+
+- View repositories; manage issues, pull requests, and reviews.
+- Inspect action runs and dispatch workflows.
+- Publish releases and assets; manage labels, milestones, and branches.
+- Use readable views, stable tab-separated output, or compact JSON with selected fields.
+- Preview writes with `--dry-run`, or use `api` for other Forgejo endpoints.
+
+## Preview
+
+After login, preview an issue without creating it. This is actual CLI output
+using an example host, repository, title, and body:
+
+```console
+$ fjx issue create --host https://forgejo.example -R owner/repo --title 'Example issue' --body 'Example description.' --dry-run
+POST	https://forgejo.example/api/v1/repos/owner/repo/issues	{"body":"Example description.","title":"Example issue"}
+```
+
+## Install (recommended)
+
+Download the archive for your system and its matching `.sha256` file from
+[Forgejo Releases](https://dyad.tail77425.ts.net/forgejo/dalton/fjx/releases).
+
+| System | Archive target |
+| --- | --- |
+| Linux x86-64 or ARM64, glibc | `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu` |
+| Linux x86-64 or ARM64, musl | `x86_64-unknown-linux-musl` or `aarch64-unknown-linux-musl` |
+| macOS Apple Silicon | `aarch64-apple-darwin` |
+| Windows x86-64 | `x86_64-pc-windows-gnu` |
+
+Verify the checksum before extracting. For example, on Linux x86-64 with glibc,
+run these commands in the download directory:
+
+```sh
+sha256sum --check fjx-0.3.2-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf fjx-0.3.2-x86_64-unknown-linux-gnu.tar.gz
+./fjx --version
+```
+
+Move `fjx` to a directory on `PATH`. On Windows, extract the `.zip` archive and
+add the directory containing `fjx.exe` to `PATH`. On macOS, use `shasum -a 256 -c`
+to check the checksum; on Windows, compare `Get-FileHash -Algorithm SHA256` with
+the value in the `.sha256` file.
+
+Earlier releases are also available from
+[GitHub Releases](https://github.com/DaltonAlley/fjx/releases).
 
 ## Install from source
 
@@ -16,13 +61,8 @@ fjx --version
 ```
 
 Make sure Cargo's binary directory, normally `$HOME/.cargo/bin`, is on `PATH`.
-The crate has `publish = false`, so it is not published to crates.io. Binary
-archives and SHA-256 checksums are available from
-[Forgejo Releases](https://dyad.tail77425.ts.net/forgejo/dalton/fjx/releases).
-Earlier GitHub releases remain available from
-[GitHub Releases](https://github.com/DaltonAlley/fjx/releases). To build without
-installing, run `cargo build --locked --release` and use `target/release/fjx`
-(`fjx.exe` on Windows).
+The crate is not published to crates.io. To build without installing, run
+`cargo build --locked --release` and use `target/release/fjx` (`fjx.exe` on Windows).
 
 ## Quickstart
 

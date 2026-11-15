@@ -30,41 +30,52 @@ static format validation in this workflow; the optional full local smoke
 pipeline below is separate.
 
 Only after local verification does the job create the annotated `fjx/vVERSION`
-tag and Forgejo release and upload the twelve archive/checksum assets. It then
-downloads the attachments and compares their bytes to the verified local files.
+tag and a **draft** Forgejo release and upload the twelve archive/checksum assets.
+It downloads every attachment and compares its bytes to the verified local file
+before making the release public. It then verifies the public release again.
 The built-in repository job token supplies authentication; no PAT secret is
-needed. Main runs are serialized and are not canceled by later pushes.
+needed. Build/test subprocesses do not inherit that token. Main runs are
+serialized and are not canceled by later pushes.
 
 If publication fails, inspect the tag, release, and asset state before rerunning
 the original workflow. The helpers preserve matching tags, reject mismatched
-tags or unexpected metadata/assets, and upload only missing attachments. Writes
-are never retried automatically. A completed run verifies existing attachments
-again; it does not overwrite them. A manual workflow dispatch runs checks only.
+tags or unexpected metadata/assets, and upload only missing draft attachments.
+Failed builds create no tag or release; failed uploads or downloads leave the
+release as a draft. A publication request can succeed even if its response is
+lost: rerun the original workflow to read the state and verify all assets again,
+without republishing or overwriting them. Writes are never retried automatically.
+An already public release with missing attachments is rejected for explicit
+repair; the job will not add files to a partial public release. A manual workflow
+dispatch runs checks only. The publisher independently rechecks the main-push
+context, exact revision, and version increase before contacting Forgejo.
 
 ### Maintain the Dyad runners
 
-[ci/Containerfile](../ci/Containerfile) owns the prepared image;
-[ci/runner.nix](../ci/runner.nix) packages the installer and runner executable.
-Install under Dalton's lingering user account on Dyad. The installer declares
-two persistent user services, scoped to `dalton/fjx`, using the existing
-`forgejo-pr-podman.service` socket. Job containers are unprivileged, have no
-host mounts or socket, and have bounded CPU and memory use. Runtime credentials
-live in private `~/.local/state/fjx-runner/{ci,release}/.runner` files.
+The maintained Dyad deployments live in
+[dalton/nixos](https://dyad.tail77425.ts.net/forgejo/dalton/nixos).
+`project-ci-runners` owns the `fjx-ci` slot; `fjx-release-runner` owns the
+independent `fjx-release` slot. Follow that repository's preparation and scoped
+installation instructions. The release image retains the digest-pinned
+cargo-zigbuild base from [ci/Containerfile](../ci/Containerfile), with pinned
+Rust 1.97.1, all six targets, and Nushell 0.112.2. Refresh it when this toolchain
+or target contract changes.
 
-On Dyad, from a clean checkout, build the image through that rootless service:
+The release installer prepares the image in the actual rootless
+`forgejo-pr-podman.service` store before changing the release unit. It retains
+the deployment and image archive as a Nix GC root, keeps the previous deployment
+for recovery, and restarts only `forgejo-fjx-release-runner.service`. Every start
+checks storage and restores an absent image from the archive. A labelled Podman
+retainer protects the prepared image against unused-image cleanup. Preserve both
+the GC root and retainer while the runner uses them.
 
-```sh
-podman --remote --url "unix://${XDG_RUNTIME_DIR}/forgejo-pr-podman/podman.sock" \
-  build -f ci/Containerfile -t localhost/fjx-ci:prepared .
-```
-
-Build `ci/runner.nix` with the host's nixpkgs (Forgejo Runner 13.2 or newer),
-retaining the output through a profile or persistent out-link. Supply its
-`fjx-install-runner` command with the immutable local `sha256:` image ID and a
-private JSON file containing the result of `fjx api
-/repos/dalton/fjx/actions/runners/registration-token --json`. The installer
-consumes and deletes that file and reuses existing runner identities on image
-updates. Never commit credentials or put them in the image/build context.
+Verify the active unit selects that image, the image exists in that exact store,
+and the private registration is preserved. Image presence alone does not prove
+the runner is using it. The release slot remains one job, two CPUs, 4 GiB, and
+45 minutes. Job containers are unprivileged with no host mounts or socket.
+Runtime credentials stay in private `~/.local/state/fjx-runner/{ci,release}/.runner`
+files. No whole-system activation is needed. The legacy
+[ci/runner.nix](../ci/runner.nix) installer replaces both slots and does not
+provide image retention; use the separate maintained deployments on Dyad.
 
 ## Prepare a version
 
@@ -186,9 +197,9 @@ blindly. These manual steps do not add automatic publication to CI.
 
 ## Forgejo-specific publication helpers
 
-The inherited `publish-plan`, `push-tag`, `upload-missing-assets`, and
-`verify-final` commands use Forgejo API and authentication semantics. They
-require `FORGEJO_API_URL`, `FORGEJO_REPOSITORY`, and `FORGEJO_TOKEN` in the
+The `publish-plan`, `push-tag`, `upload-missing-assets`, `publish-release`, and
+`verify-final` commands use Forgejo API and authentication semantics. They require
+`FORGEJO_API_URL`, `FORGEJO_REPOSITORY`, and `FORGEJO_TOKEN` in the
 publication environment. They are not a GitHub Releases integration and must
 not be pointed at GitHub as though the APIs were interchangeable.
 

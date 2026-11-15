@@ -45,6 +45,8 @@ jobs:
         id: version
         if: forgejo.event_name == 'push' && forgejo.ref == 'refs/heads/main'
         env:
+          FORGEJO_EVENT_NAME: ${{ forgejo.event_name }}
+          FORGEJO_REF: ${{ forgejo.ref }}
           BEFORE_SHA: ${{ forgejo.event.before }}
           CHECKOUT_SHA: ${{ forgejo.sha }}
         run: nu --no-config-file scripts/forgejo-ci.nu candidate "$BEFORE_SHA" "$CHECKOUT_SHA" "$GITHUB_OUTPUT"
@@ -78,6 +80,9 @@ jobs:
 
       - name: Build, verify, and publish all six targets
         env:
+          FORGEJO_EVENT_NAME: ${{ forgejo.event_name }}
+          FORGEJO_REF: ${{ forgejo.ref }}
+          BEFORE_SHA: ${{ forgejo.event.before }}
           FORGEJO_API_URL: ${{ forgejo.api_url }}
           FORGEJO_REPOSITORY: ${{ forgejo.repository }}
           CHECKOUT_SHA: ${{ forgejo.sha }}

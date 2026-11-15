@@ -313,8 +313,8 @@ def asset-names [version: string] {
   } | flatten | sort
 }
 
-def expected-release [version: string, tag: string] {
-  {tag_name: $tag, name: ('fjx (' + $version + ')'), body: "", draft: false, prerelease: false}
+def expected-release [version: string, tag: string, --draft] {
+  {tag_name: $tag, name: ('fjx (' + $version + ')'), body: "", draft: $draft, prerelease: false}
 }
 
 def verify-downloaded-assets [directory: path, version: string] {
@@ -337,7 +337,7 @@ def verify-downloaded-assets [directory: path, version: string] {
   }
 }
 
-def validate-release [release: record, version: string, tag: string] {
+def validate-release [release: record, version: string, tag: string, --draft] {
   let actual = {
     tag_name: ($release.tag_name? | default null)
     name: ($release.name? | default null)
@@ -345,7 +345,7 @@ def validate-release [release: record, version: string, tag: string] {
     draft: ($release.draft? | default null)
     prerelease: ($release.prerelease? | default null)
   }
-  if $actual != (expected-release $version $tag) {
+  if $actual != (expected-release $version $tag --draft=$draft) {
     fail "Forgejo release metadata is not exact; refusing ambiguous repair"
   }
 }
@@ -379,6 +379,7 @@ def write-output [plan: record, output: path] {
     $"needs_tag=($plan.needs_tag? | default $plan.publish)"
     $"needs_release=($plan.needs_release? | default $plan.publish)"
     $"needs_assets=($plan.needs_assets? | default $plan.publish)"
+    $"needs_publication=($plan.needs_publication? | default $plan.publish)"
     $"missing_assets=($plan.missing_assets? | default '')"
     $"release_id=($plan.release_id? | default '')"
     $"tag=($plan.tag)"
@@ -403,18 +404,24 @@ export def publication-state [expected_revision: string, source_date_epoch: stri
   let request = release-api GET $"releases/tags/($tag | str replace --all '/' '%2F')"
   mut release_id = ""
   mut needs_release = false
+  mut needs_publication = true
   mut missing_assets = []
   match $request.status {
     "200" => {
       if $needs_tag { rm --force $request.response; fail $"($tag) has a Forgejo release but no verifiable remote tag; refusing ambiguous repair" }
       let release = try { open --raw $request.response | from json } catch { rm --force $request.response; fail "Forgejo returned an invalid release record" }
-      if ($release.tag_name? | default "") != $tag or (($release.id? | describe) !~ '^int') { rm --force $request.response; fail "Forgejo returned an invalid release identity" }
-      validate-release $release $version $tag
+      if ($release.tag_name? | default "") != $tag or (($release.id? | describe) !~ '^int') or $release.id <= 0 { rm --force $request.response; fail "Forgejo returned an invalid release identity" }
+      if ($release.draft? | describe) != bool { fail 'Forgejo release has no draft state' }
+      validate-release $release $version $tag --draft=$release.draft
+      $needs_publication = $release.draft
       $release_id = $release.id | into string
       let names = $release.assets? | default [] | each {|asset| $asset.name? | default "" }
       let expected = asset-names $version
       if ($names | uniq | length) != ($names | length) or ($names | any {|name| $name not-in $expected }) { rm --force $request.response; fail "release has duplicate or unexpected assets; refusing ambiguous repair" }
       $missing_assets = $expected | where $it not-in $names
+      if not $release.draft and ($missing_assets | is-not-empty) {
+        fail 'published release is incomplete; refusing to upload to a public release'
+      }
     }
     "404" => { $needs_release = true; $missing_assets = asset-names $version }
     _ => { rm --force $request.response; fail $"could not determine whether the Forgejo release exists (HTTP ($request.status))" }
@@ -424,7 +431,7 @@ export def publication-state [expected_revision: string, source_date_epoch: stri
   # can compare the remote bytes with output that passed the native checks.
   let needs_assets = true
   let complete = not ($needs_tag or $needs_release or $needs_assets)
-  let plan = {publish: (not $complete), needs_tag: $needs_tag, needs_release: $needs_release, needs_assets: $needs_assets, missing_assets: ($missing_assets | str join ','), release_id: $release_id, tag: $tag, version: $version, source_date_epoch: $source_date_epoch}
+  let plan = {publish: (not $complete), needs_tag: $needs_tag, needs_release: $needs_release, needs_publication: $needs_publication, needs_assets: $needs_assets, missing_assets: ($missing_assets | str join ','), release_id: $release_id, tag: $tag, version: $version, source_date_epoch: $source_date_epoch}
   $plan
 }
 
@@ -433,7 +440,7 @@ def "main publish-plan" [expected_revision: string, source_date_epoch: string, o
 }
 
 export def create-release [version: string, tag: string] {
-  let request = release-api POST releases --body (expected-release $version $tag)
+  let request = release-api POST releases --body (expected-release $version $tag --draft)
   if $request.status != '201' {
     rm --force $request.response
     fail $"Forgejo refused release creation (HTTP ($request.status)); inspect remote state before rerunning"
@@ -443,7 +450,7 @@ export def create-release [version: string, tag: string] {
     fail "Forgejo returned invalid JSON after creating the release; inspect remote state"
   }
   rm --force $request.response
-  validate-release $release $version $tag
+  validate-release $release $version $tag --draft
   if (($release.id? | describe) !~ '^int') or $release.id <= 0 {
     fail 'Forgejo returned an invalid release ID; inspect remote state before rerunning'
   }
@@ -473,7 +480,7 @@ def "main push-tag" [tag: string, revision: string] {
   if $pushed.exit_code != 0 { fail "authenticated release tag push failed" }
 }
 
-def "main verify-final" [version: string, revision: string, tag: string] {
+def verified-release [version: string, revision: string, tag: string, --draft] {
   if $version != (validate-versions) or $tag != $"fjx/v($version)" { fail "final release identity does not match project version" }
   if (inspect-remote-tags $tag $revision $version) { fail "final release tag is missing" }
   let request = release-api GET $"releases/tags/($tag | str replace --all '/' '%2F')"
@@ -481,11 +488,35 @@ def "main verify-final" [version: string, revision: string, tag: string] {
   let release = try { open --raw $request.response | from json } catch { rm --force $request.response; fail "final Forgejo release is invalid JSON" }
   rm --force $request.response
   let names = $release.assets? | default [] | each {|asset| $asset.name? | default "" } | sort
-  validate-release $release $version $tag
+  validate-release $release $version $tag --draft=$draft
+  if (($release.id? | describe) !~ '^int') or $release.id <= 0 { fail 'invalid final release ID' }
   if $names != (asset-names $version) { fail "final Forgejo release identity or assets are not exact" }
   verify-remote-assets $release $version
+  $release
+}
+
+def "main verify-final" [version: string, revision: string, tag: string] {
+  verified-release $version $revision $tag | ignore
+}
+
+# The only transition to a public release: all remote bytes must first match
+# the complete locally checked set. An ambiguous PATCH stops; reruns read state.
+def "main publish-release" [version: string, revision: string, tag: string] {
+  let release = verified-release $version $revision $tag --draft
+  let request = release-api PATCH $"releases/($release.id)" --body {draft: false}
+  if $request.status != '200' {
+    rm --force $request.response
+    fail $"Forgejo refused publication (HTTP ($request.status)); inspect remote state before rerunning"
+  }
+  let published = try { open --raw $request.response | from json } catch {
+    rm --force $request.response
+    fail 'invalid publication response; inspect remote state before rerunning'
+  }
+  rm --force $request.response
+  validate-release $published $version $tag
+  if ($published.id? | default null) != $release.id { fail 'published release ID changed; inspect remote state' }
 }
 
 def main [] {
-  fail "usage: scripts/release.nu (version|validate|validate-tag TAG|prepare [--dry-run] BUMP|publish-plan REVISION EPOCH OUTPUT|push-tag TAG REVISION|upload-missing-assets RELEASE_ID NAMES|verify-final VERSION REVISION TAG)"
+  fail "usage: scripts/release.nu (version|validate|validate-tag TAG|prepare [--dry-run] BUMP|publish-plan REVISION EPOCH OUTPUT|push-tag TAG REVISION|upload-missing-assets RELEASE_ID NAMES|publish-release VERSION REVISION TAG|verify-final VERSION REVISION TAG)"
 }

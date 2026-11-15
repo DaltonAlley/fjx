@@ -40,6 +40,8 @@ export def release-candidate [before: string, revision: string] {
 export def build-assets [revision: string] {
   cd $project_dir
   hide-env --ignore-errors RELEASE_WORKSPACE_ROOT
+  # Only the publication helpers need authentication, never Cargo build scripts.
+  hide-env --ignore-errors FJX_TOKEN FORGEJO_TOKEN GITEA_TOKEN GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN
   let version = validate-versions
   if (^git rev-parse HEAD | str trim) != $revision { fail 'release checkout changed' }
   let epoch = ^git show -s --format=%ct $revision | str trim | into int
@@ -71,10 +73,15 @@ export def build-assets [revision: string] {
   rm --recursive --force $binaries
 }
 
+def main-push [] {
+  ($env.FORGEJO_REF? | default '') == 'refs/heads/main' and ($env.FORGEJO_EVENT_NAME? | default '') == push
+}
+
 def "main candidate" [before: string, revision: string, output: path] {
   cd $project_dir
   hide-env --ignore-errors RELEASE_WORKSPACE_ROOT
-  $"release=(release-candidate $before $revision)\n" | save --append --raw $output
+  let candidate = if (main-push) { release-candidate $before $revision } else { false }
+  $"release=($candidate)\n" | save --append --raw $output
 }
 
 def "main build" [revision: string] { build-assets $revision }
@@ -82,8 +89,11 @@ def "main build" [revision: string] { build-assets $revision }
 def "main publish" [revision: string] {
   cd $project_dir
   hide-env --ignore-errors RELEASE_WORKSPACE_ROOT
-  if ($env.FORGEJO_REF? | default '') != 'refs/heads/main' or ($env.FORGEJO_EVENT_NAME? | default '') != push {
+  if not (main-push) {
     fail 'publication is only allowed for a push to main'
+  }
+  if not (release-candidate ($env.BEFORE_SHA? | default '') $revision) {
+    fail 'publication requires a version increase across this push'
   }
   let epoch = ^git show -s --format=%ct $revision | str trim
   # Reconcile remote state before building, and again immediately before writes.
@@ -99,6 +109,9 @@ def "main publish" [revision: string] {
   } else { $plan.release_id }
   if ($plan.missing_assets | is-not-empty) {
     checked $nu.current-exe [--no-config-file $release_script upload-missing-assets $release_id $plan.missing_assets]
+  }
+  if $plan.needs_publication {
+    checked $nu.current-exe [--no-config-file $release_script publish-release $plan.version $revision $plan.tag]
   }
   checked $nu.current-exe [--no-config-file $release_script verify-final $plan.version $revision $plan.tag]
   print $"Published and verified ($plan.tag)."

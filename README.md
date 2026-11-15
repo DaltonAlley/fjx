@@ -151,11 +151,12 @@ version validation. It additionally needs GNU coreutils, `tar`, `gzip`, `zip`,
 `unzip`, and `file`.
 
 A version increase merged or pushed to `main` triggers a separate six-target
-binary release after checks
-pass. Builds, archive checks, and Linux x86-64 runtime smoke checks precede
-publication; downloaded release assets must match the checked local files.
+binary release after checks pass. Builds, archive checks, and Linux x86-64
+runtime smoke checks precede uploads to a draft. The release becomes public
+only after all twelve downloaded assets match the checked local files. PRs,
+manual checks, and unchanged versions never publish.
 
-GitHub CI runs the full checks on Ubuntu 24.04 and Rust tests and Clippy on
+GitHub CI runs the build and E2E gate on Ubuntu 24.04 and Rust tests and Clippy on
 native Windows. GitHub releases remain manual. Neither workflow provides native
 macOS runtime coverage.
 

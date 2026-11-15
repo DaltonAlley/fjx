@@ -8,7 +8,6 @@ use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
-#[cfg(unix)]
 use std::process::Stdio;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -222,8 +221,96 @@ fn windows_environment_token_needs_no_home_or_persisted_config() {
         .unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(persistence.status.code(), Some(3));
     assert!(persistence.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&persistence.stderr).contains("saved tokens are unavailable"));
+    assert!(
+        String::from_utf8_lossy(&persistence.stderr).contains("saved token path is unavailable")
+    );
     fs::remove_dir_all(root).unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[test]
+#[cfg(windows)]
+fn windows_login_saves_a_token_that_later_commands_use() {
+    let root = temp_dir("windows-login");
+    let config = root.join("fjx/hosts.json");
+    let user = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 18\r\nConnection: close\r\n\r\n{\"login\":\"dalton\"}";
+    let (host, server) = serve(vec![user, user]);
+    let mut child = command()
+        .args(["auth", "login", "--with-token", "--json", "--host", &host])
+        .env("FJX_CONFIG", &config)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("{error}"));
+    child
+        .stdin
+        .take()
+        .unwrap_or_else(|| panic!("missing stdin"))
+        .write_all(b"login-secret\n")
+        .unwrap_or_else(|error| panic!("{error}"));
+    let login = child
+        .wait_with_output()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(
+        login.status.success(),
+        "{}",
+        String::from_utf8_lossy(&login.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&login.stdout).contains("login-secret"));
+
+    // A fresh process finds the saved default host and token.
+    let status = command()
+        .args(["auth", "status", "--json"])
+        .env("FJX_CONFIG", &config)
+        .current_dir(&root)
+        .output()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&status.stdout),
+        format!(
+            "{{\"kind\":\"auth\",\"host\":\"{host}\",\"user\":\"dalton\",\"source\":\"config\"}}\n"
+        )
+    );
+    let requests = server.join().unwrap_or_else(|_| panic!("server panicked"));
+    assert!(
+        requests[1].contains("Authorization: token login-secret\r\n"),
+        "{requests:?}"
+    );
+
+    // The saved file has a protected access list naming only the current user.
+    let acl = command_output("icacls", &[config.as_os_str()]);
+    let entries = acl.lines().filter(|line| line.contains(":(")).count();
+    assert_eq!(entries, 1, "{acl}");
+    assert!(!acl.contains("(I)"), "{acl}");
+
+    let logout = command()
+        .args(["auth", "logout", "--host", &host])
+        .env("FJX_CONFIG", &config)
+        .output()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(
+        logout.status.success(),
+        "{}",
+        String::from_utf8_lossy(&logout.stderr)
+    );
+    let saved = fs::read_to_string(&config).unwrap_or_else(|error| panic!("{error}"));
+    assert!(!saved.contains("login-secret"));
+    fs::remove_dir_all(root).unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[cfg(windows)]
+fn command_output(program: &str, arguments: &[&std::ffi::OsStr]) -> String {
+    let output = Command::new(program)
+        .args(arguments)
+        .output()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 #[test]

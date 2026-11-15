@@ -6,11 +6,16 @@ use std::fs;
 #[cfg(unix)]
 use std::fs::OpenOptions;
 use std::io::Read;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+
+#[cfg(any(windows, test))]
+mod acl;
+#[cfg(windows)]
+mod windows;
 
 use serde::{Deserialize, Serialize};
 
@@ -95,9 +100,36 @@ impl Config {
             ));
         }
         validate_token_file_security(&metadata)?;
+        #[cfg(not(windows))]
+        let mut file = fs::File::open(path)
+            .map_err(|error| Error::context(format!("could not read token file: {error}")))?;
+        #[cfg(windows)]
+        let mut file = {
+            use std::os::windows::fs::OpenOptionsExt;
+            // Inspect the final component itself and prevent replacement while
+            // checking and reading this handle.
+            fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1) // FILE_SHARE_READ
+                .custom_flags(0x0020_0000) // FILE_FLAG_OPEN_REPARSE_POINT
+                .open(path)
+                .map_err(|error| Error::context(format!("could not read token file: {error}")))?
+        };
+        #[cfg(windows)]
+        {
+            let metadata = file.metadata().map_err(|error| {
+                Error::context(format!("could not inspect token file: {error}"))
+            })?;
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(Error::context(
+                    "token file must be a regular file, not a link",
+                ));
+            }
+            validate_token_file_security(&metadata)?;
+            validate_open_token_file(&file)?;
+        }
         let mut bytes = Vec::new();
-        fs::File::open(path)
-            .and_then(|mut file| file.read_to_end(&mut bytes))
+        file.read_to_end(&mut bytes)
             .map_err(|error| Error::context(format!("could not read token file: {error}")))?;
         let config: Self = serde_json::from_slice(&bytes)
             .map_err(|error| Error::context(format!("invalid token file: {error}")))?;
@@ -303,7 +335,80 @@ impl Config {
         Ok(())
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    pub(crate) fn save(&self, path: &Path) -> Result<(), Error> {
+        self.validate()?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| Error::local("token file path has no parent directory"))?;
+        let directory = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            fs::create_dir_all(parent).map_err(|error| {
+                Error::local(format!("could not create token directory: {error}"))
+            })?;
+            parent
+        };
+        match fs::symlink_metadata(path) {
+            Ok(metadata)
+                if metadata.file_type().is_symlink() || !metadata.file_type().is_file() =>
+            {
+                return Err(Error::context(
+                    "token file must be a regular file, not a link",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(Error::local(format!(
+                    "could not inspect token file: {error}"
+                )));
+            }
+        }
+        let bytes = serde_json::to_vec(self)
+            .map_err(|error| Error::local(format!("could not encode token file: {error}")))?;
+        let mut temporary = None;
+        for attempt in 0..100_u8 {
+            let candidate =
+                directory.join(format!(".fjx-hosts.{}.{}.tmp", std::process::id(), attempt));
+            let mut file = match windows::create_private(&candidate) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(Error::local(format!(
+                        "could not create private token file: {error}"
+                    )));
+                }
+            };
+            let written = validate_open_token_file(&file)
+                .map_err(|error| Error::local(error.to_string()))
+                .and_then(|()| {
+                    file.write_all(&bytes)
+                        .and_then(|()| file.sync_all())
+                        .map_err(|error| {
+                            Error::local(format!("could not write token file: {error}"))
+                        })
+                });
+            // The file is not shareable, so close it before removing or renaming it.
+            drop(file);
+            if let Err(error) = written {
+                let _ = fs::remove_file(&candidate);
+                return Err(error);
+            }
+            temporary = Some(candidate);
+            break;
+        }
+        let temporary = temporary.ok_or_else(|| Error::local("could not allocate token file"))?;
+        if let Err(error) = fs::rename(&temporary, path) {
+            let _ = fs::remove_file(&temporary);
+            return Err(Error::local(format!(
+                "could not replace token file: {error}"
+            )));
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(unix, windows)))]
     pub(crate) fn save(&self, _path: &Path) -> Result<(), Error> {
         self.validate()?;
         Err(persistence_unavailable())
@@ -318,7 +423,31 @@ fn validate_token_file_security(metadata: &fs::Metadata) -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn validate_token_file_security(metadata: &fs::Metadata) -> Result<(), Error> {
+    use std::os::windows::fs::MetadataExt;
+
+    if metadata.file_attributes() & 0x0400 != 0 {
+        return Err(Error::context("token file must not be a reparse point"));
+    }
+    // The DACL is checked on the open handle; see `validate_open_token_file`.
+    Ok(())
+}
+
+#[cfg(windows)]
+fn validate_open_token_file(file: &fs::File) -> Result<(), Error> {
+    match windows::check_private(file) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(reason)) => Err(Error::context(format!(
+            "token file must be private to the current user, but {reason}"
+        ))),
+        Err(error) => Err(Error::context(format!(
+            "could not verify token file access: {error}"
+        ))),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn validate_token_file_security(_metadata: &fs::Metadata) -> Result<(), Error> {
     Err(persistence_unavailable())
 }
@@ -460,11 +589,11 @@ fn windows_default_path(
 
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     use std::path::Path;
     #[cfg(windows)]
     use std::{ffi::OsString, path::PathBuf};
@@ -558,7 +687,86 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    fn saves_an_owner_only_file_and_rejects_shared_access() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = std::env::temp_dir().join(format!("fjx-config-test-{}", std::process::id()));
+        let path = root.join("nested/hosts.json");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("nested")).unwrap_or_else(|error| panic!("{error}"));
+        // Even a shared parent must not contribute inherited access to the file.
+        let status = std::process::Command::new("icacls")
+            .arg(root.join("nested"))
+            .args(["/grant", "*S-1-1-0:(OI)(CI)(R)"])
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(status.success());
+        let host = Host::parse("https://forge.example").unwrap_or_else(|error| panic!("{error}"));
+        let mut config = Config::empty();
+        config
+            .login(
+                &host,
+                "user".to_owned(),
+                Token::parse("secret".to_owned()).unwrap_or_else(|error| panic!("{error}")),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        config.save(&path).unwrap_or_else(|error| panic!("{error}"));
+        // Saving again replaces the file in place.
+        config.save(&path).unwrap_or_else(|error| panic!("{error}"));
+        let loaded = Config::load(&path).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            loaded.token(&host).map(|token| token.0),
+            Some("secret".to_owned())
+        );
+        let leftovers = std::fs::read_dir(root.join("nested"))
+            .unwrap_or_else(|error| panic!("{error}"))
+            .count();
+        assert_eq!(leftovers, 1);
+
+        // Grant Everyone (S-1-1-0) read access, as a careless copy or edit might.
+        let status = std::process::Command::new("icacls")
+            .arg(&path)
+            .args(["/grant", "*S-1-1-0:R"])
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(status.success());
+        let error = Config::load(&path)
+            .err()
+            .unwrap_or_else(|| panic!("a shared token file must be rejected"));
+        assert_eq!(error.code(), 3);
+        assert!(
+            error
+                .to_string()
+                .contains("token file must be private to the current user"),
+            "{error}"
+        );
+        // A failed replacement leaves the old token intact and removes the temp file.
+        let before = fs::read(&path).unwrap_or_else(|error| panic!("{error}"));
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(config.save(&path).is_err());
+        assert_eq!(
+            fs::read_dir(root.join("nested"))
+                .unwrap_or_else(|error| panic!("{error}"))
+                .count(),
+            1
+        );
+        drop(file);
+        assert_eq!(
+            fs::read(&path).unwrap_or_else(|error| panic!("{error}")),
+            before
+        );
+        std::fs::remove_dir_all(root).unwrap_or_else(|error| panic!("{error}"));
+    }
+
+    #[test]
+    #[cfg(not(any(unix, windows)))]
     fn refuses_to_persist_tokens_without_verifiable_private_access() {
         let error = Config::empty()
             .save(Path::new("hosts.json"))

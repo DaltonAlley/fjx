@@ -35,12 +35,12 @@ pub(crate) struct Context {
 impl Context {
     pub(crate) fn resolve(args: &Args, need_repo: bool, need_token: bool) -> Result<Self, Error> {
         let config_path = config::path_for_context()?;
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         let config = match config_path.as_deref() {
             Some(path) => Config::load(path)?,
             None => Config::empty(),
         };
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         let config = Config::empty();
         let explicit_repo = args
             .repo

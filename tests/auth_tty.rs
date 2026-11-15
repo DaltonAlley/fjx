@@ -1,3 +1,6 @@
+// These terminal tests depend on util-linux script and a Unix shell.
+#![cfg(unix)]
+
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 

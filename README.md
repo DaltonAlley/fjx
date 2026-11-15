@@ -26,7 +26,7 @@ installing, run `cargo build --locked --release` and use `target/release/fjx`
 
 ## Quickstart
 
-On Unix, create a token on your Forgejo server with permissions for your commands,
+Create a token on your Forgejo server with permissions for your commands,
 then enter it at the hidden prompt:
 
 ```sh
@@ -45,7 +45,6 @@ to share the saved login with Git and `jj git push`.
 For automation, supply `FJX_TOKEN` or `FORGEJO_TOKEN` through your environment's
 secret mechanism. `auth login --with-token` reads one trimmed line from stdin,
 but avoid typing tokens into `echo` commands, shell history, or command arguments.
-Windows uses environment tokens rather than saved logins.
 
 ## Documentation
 
@@ -58,7 +57,7 @@ Windows uses environment tokens rather than saved logins.
 
 ## Command examples
 
-The first three commands below show the Unix saved-login workflow. On Windows, set `FJX_TOKEN` or `FORGEJO_TOKEN` instead.
+Saved logins work on Unix and native Windows.
 
 ```text
 fjx auth login --host https://forgejo.example
@@ -93,11 +92,11 @@ fjx api /repos/owner/repo/issues --paginate --json
 
 ## Configuration and safety
 
-Common flags may go before or after command words: `--host URL`, `-R OWNER/REPO`, `--json`, `--dry-run`, and `--yes`. `FJX_HOST`, `FJX_REPO`, `FJX_TOKEN`, and `FORGEJO_TOKEN` provide non-interactive context. On Unix, `FJX_CONFIG` selects the token store.
+Common flags may go before or after command words: `--host URL`, `-R OWNER/REPO`, `--json`, `--dry-run`, and `--yes`. `FJX_HOST`, `FJX_REPO`, `FJX_TOKEN`, and `FORGEJO_TOKEN` provide non-interactive context. `FJX_CONFIG` selects the token store.
 
-On Unix, `auth login` takes a token from a hidden prompt. Pass `--with-token` to read one trimmed line from stdin. `auth setup-git` installs a host-scoped Git credential helper so Git and `jj git push` can use the same saved login. Unix token files use mode 0600.
+`auth login` takes a token from a hidden prompt. Pass `--with-token` to read one trimmed line from stdin. `auth setup-git` installs a host-scoped Git credential helper so Git and `jj git push` can use the same saved login. Unix token files use mode 0600.
 
-On Windows, use `FJX_TOKEN` or `FORGEJO_TOKEN`; commands can run without `HOME`, `APPDATA`, or `USERPROFILE` when `--host` or `FJX_HOST` supplies the host. Persisted config and `auth login`, `auth logout`, and `auth setup-git` are unavailable because fjx cannot verify private file access with its current dependency set.
+On Windows, saved tokens default to `%APPDATA%\fjx\hosts.json`, with a `%USERPROFILE%\AppData\Roaming` fallback. Files are created with a protected DACL granting access only to the current user. Before reading, fjx checks the open file's owner and DACL; only the current user, SYSTEM, and built-in Administrators may have access. Filesystems that cannot enforce or report these permissions fail closed. The file remains plaintext on disk, protected by Windows access controls. This works in SSH sessions without Credential Manager. Environment tokens still work without `HOME`, `APPDATA`, or `USERPROFILE` when `--host` or `FJX_HOST` supplies the host.
 
 Tokens never appear in command arguments or user-facing output. The client accepts HTTPS hosts and loopback HTTP hosts and rejects redirects.
 
@@ -146,8 +145,9 @@ or pushed to `main` triggers a separate six-target binary release after checks
 pass. Builds, archive checks, and Linux x86-64 runtime smoke checks precede
 publication; downloaded release assets must match the checked local files.
 
-GitHub CI still runs on Ubuntu 24.04 and GitHub releases remain manual. Neither
-workflow provides native Windows or macOS runtime coverage.
+GitHub CI runs the full checks on Ubuntu 24.04 and Rust tests and Clippy on
+native Windows. GitHub releases remain manual. Neither workflow provides native
+macOS runtime coverage.
 
 See [release maintenance](docs/releasing.md) for version preparation, packaging,
 and the distinction between local tooling and automated publication.

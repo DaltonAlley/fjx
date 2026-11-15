@@ -14,7 +14,7 @@ boundary prevents partial success output when a request or later page fails.
 | `host` | Host URL validation and API URL construction, including loopback HTTP rules. |
 | `repo` | Owner/repository validation and Git/jj remote inference. |
 | `context` | Resolve explicit flags, environment, remotes, saved host, and token source. |
-| `config` | Token validation, Unix private-file checks, persistence, and credential lookup. |
+| `config` | Token validation, private-file checks, persistence, and credential lookup. Windows system calls are isolated in `config/windows.rs`; descriptor rules in `config/acl.rs` are tested on every platform. |
 | `http` | Synchronous authenticated requests, redirect refusal, bounded response reads, and HTTP errors. |
 | `commands` | Typed Forgejo operations, raw API path rules, pagination, and command outcomes. |
 | `output` | Stable plain-field encoding, safe multiline human text, compact JSON, and field projection. |
@@ -42,8 +42,11 @@ default host is a final host fallback. Tokens resolve in order: `FJX_TOKEN`,
 values fail rather than silently choosing another token.
 
 On Unix, saved credentials are protected by private-file permission checks.
-Windows uses environment tokens because the current dependency set cannot verify
-private persisted-file access. Authentication output must never disclose tokens.
+Windows creates files with a protected owner-only DACL and verifies the owner and
+DACL on the same handle used to read tokens. SYSTEM and built-in Administrators
+are also accepted when reading existing files. This uses file access controls,
+including in SSH network logons, without Credential Manager. Authentication
+output must never disclose tokens.
 
 ## Safety and output invariants
 
@@ -53,8 +56,9 @@ private persisted-file access. Authentication output must never disclose tokens.
 - Pagination and run watching accumulate a final result before returning output.
 - Plain fields have reversible control-character escaping. JSON retains original
   values. See [README output contracts](../README.md#output-contracts).
-- There is no unsafe Rust and no public library API. Runtime dependencies stay
-  limited to those listed in [AGENTS.md](../AGENTS.md).
+- Unsafe Rust is denied except in `config/windows.rs`, whose documented Windows
+  API calls use owned handles and aligned buffers. There is no public library API.
+  Runtime dependencies stay limited to those listed in [AGENTS.md](../AGENTS.md).
 
 ## Verification
 

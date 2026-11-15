@@ -61,3 +61,19 @@ jobs:
 
       - name: Run all checks
         run: nu --no-config-file scripts/check.nu
+
+  windows:
+    name: Native Windows token storage
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      - name: Check Windows code
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Run Windows tests
+        run: cargo test --locked --all-targets

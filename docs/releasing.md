@@ -2,8 +2,8 @@
 
 Forgejo publishes binary releases automatically when the version increases on
 `main` and checks pass on that exact commit. GitHub releases remain manual.
-The crate is not published to crates.io (`publish = false`). Neither CI workflow
-provides native Windows or macOS testing.
+The crate is not published to crates.io (`publish = false`). GitHub CI includes
+native Windows Rust tests and Clippy. Neither workflow provides native macOS testing.
 
 ## Automatic Forgejo releases
 

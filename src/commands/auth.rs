@@ -405,7 +405,7 @@ fn config_path(context: &Context) -> Result<&std::path::Path, Error> {
 }
 
 fn require_persistence() -> Result<(), Error> {
-    if cfg!(unix) {
+    if cfg!(any(unix, windows)) {
         Ok(())
     } else {
         Err(config::persistence_unavailable())

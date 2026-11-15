@@ -1,7 +1,7 @@
 # Release maintenance
 
 Forgejo publishes binary releases automatically when the version increases on
-`main` and checks pass on that exact commit. GitHub releases remain manual.
+`main` and checks pass on that exact commit. Published releases are copied to GitHub.
 The crate is not published to crates.io (`publish = false`). GitHub CI includes
 native Windows Rust tests and Clippy. Neither workflow provides native macOS testing.
 
@@ -156,44 +156,42 @@ Wine. macOS gets static Mach-O validation only. None of these is native Windows
 or macOS runtime CI, and the normal GitHub check workflow does not run this
 full release-build/smoke pipeline.
 
-## Publish manually on GitHub
+## GitHub mirror
 
-Use the authenticated GitHub CLI for `DaltonAlley/fjx`. The Forgejo publication
-helpers below are not compatible with GitHub. Before publication:
+Forgejo is authoritative. Its native push mirror sends all branches and tags to
+`DaltonAlley/fjx` after pushes, with hourly reconciliation. It uses a dedicated
+GitHub write deploy key. GitHub-only refs can be overwritten or deleted; make
+changes on Forgejo. Before activation, the old GitHub branches and annotated
+release tags were preserved on Forgejo, including the former GitHub main under
+`archive/github/main-20261115`. A verified Git bundle also preserves the old refs.
 
-1. Commit the prepared version and documentation, merge or push it to `main`,
-   and wait for CI on that exact commit to pass.
-2. Build all six targets from that commit, using its Unix commit timestamp as
-   `--source-date-epoch`, and run the inventory and checksum verification above.
-   Record actual runtime checks in the release notes without claiming native
-   Windows or macOS coverage from the Linux CI job.
-3. Review `git remote get-url origin`, `gh auth status`, and
-   `gh repo view --json nameWithOwner,url`. Validate the tag against the prepared
-   version and make sure neither the tag nor release already exists.
-4. Write release notes outside the source tree and create a draft containing
-   all six archives and their six `.sha256` files. For example, from the checked
-   release commit:
+[Release mirroring](../.forgejo/workflows/github-mirror.yaml) listens for
+published/edited releases and main pushes, and reconciles every six hours at
+00:23, 06:23, 12:23 and 18:23 UTC. It always runs the script from trusted main,
+uses the existing `fjx-release` runner, and serializes runs without cancellation.
+This consumes the existing version-bump publisher's public releases, without
+rebuilding binaries. The separate `GH_RELEASE_MIRROR_TOKEN` Actions secret is
+only supplied to the copy step. A repository-scoped GitHub token needs Contents
+write permission; unlike code mirroring, release copying needs no Workflows scope.
 
-   ```sh
-   git tag -a fjx/v0.3.1 -m "fjx v0.3.1"
-   git push origin refs/tags/fjx/v0.3.1
-   gh release create fjx/v0.3.1 --repo DaltonAlley/fjx --verify-tag --draft \
-     --title "fjx v0.3.1" --notes-file ../release-notes.md ../release-assets/*
-   gh release view fjx/v0.3.1 --repo DaltonAlley/fjx
-   ```
+Every run scans all published Forgejo releases, including initial backfill.
+[The copier](../scripts/github-mirror.nu) checks exact source/destination tag
+hashes, all twelve asset names, archive checksums and downloaded byte parity.
+New GitHub releases remain drafts until verification finishes. Source drafts
+are skipped, prerelease flags are retained, and prereleases are never marked
+latest. Stable releases use GitHub's version-based legacy latest selection.
+Earlier GitHub-only releases are retained. Issues, PR discussions, CI history,
+wiki content, repository settings, secrets and package registries are not copied.
 
-5. Check that the remote tag points to the intended commit and download the
-   draft assets to a fresh directory. Run `package-release.nu verify` on that
-   directory before publishing:
-
-   ```sh
-   gh release edit fjx/v0.3.1 --repo DaltonAlley/fjx --draft=false --latest
-   ```
-
-Verify the published release and its asset inventory once more. If a write
-returns an ambiguous result, inspect remote state before deciding whether any
-repair is needed. Never overwrite an existing release tag or retry a write
-blindly. These manual steps do not add automatic publication to CI.
+Rerun **Mirror GitHub releases** or dispatch `github-mirror.yaml` on `main` to
+recover a missed event or interrupted upload. The scheduled scan also recovers
+these cases. Reruns read server state, verify existing bytes and upload only
+missing draft assets. Exact releases require no writes. Conflicting assets,
+unexpected files, mismatched tags and incomplete public GitHub releases stop
+with an Actions failure for explicit repair. No asset, tag or release is deleted
+or overwritten by the copier. Release withdrawals/deletions are not propagated;
+handle those explicitly on both services. This is a mirror, not an archival
+backup of all Forgejo platform state.
 
 ## Forgejo-specific publication helpers
 

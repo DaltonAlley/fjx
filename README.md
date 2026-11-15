@@ -46,7 +46,7 @@ add the directory containing `fjx.exe` to `PATH`. On macOS, use `shasum -a 256 -
 to check the checksum; on Windows, compare `Get-FileHash -Algorithm SHA256` with
 the value in the `.sha256` file.
 
-Earlier releases are also available from
+Code and published releases are mirrored from Forgejo to GitHub. Downloads are also available from
 [GitHub Releases](https://github.com/DaltonAlley/fjx/releases).
 
 ## Install from source
@@ -197,7 +197,8 @@ only after all twelve downloaded assets match the checked local files. PRs,
 manual checks, and unchanged versions never publish.
 
 GitHub CI runs the build and E2E gate on Ubuntu 24.04 and Rust tests and Clippy on
-native Windows. GitHub releases remain manual. Neither workflow provides native
+native Windows. GitHub release mirroring copies the verified Forgejo notes,
+binaries, and checksums; it does not rebuild them. Neither workflow provides native
 macOS runtime coverage.
 
 See [release maintenance](docs/releasing.md) for version preparation, packaging,

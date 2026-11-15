@@ -103,11 +103,29 @@ def test-forgejo-ci-contract [] {
   check (not ($text | str contains 'apt-get')) 'tool installation must stay outside PR jobs'
 }
 
+def test-github-mirror-contract [] {
+  let workflow = open .forgejo/workflows/github-mirror.yaml
+  check (($workflow.on | columns | sort) == [push release schedule workflow_dispatch]) 'release copying must have recovery and must never run PR code'
+  check ($workflow.on.push.branches == [main]) 'only trusted main pushes may trigger the mirror'
+  check ($workflow.on.release.types == [published edited]) 'mirror public releases and metadata edits'
+  check ($workflow.on.schedule.0.cron == '23 */6 * * *') 'missed releases need six-hour reconciliation'
+  check ($workflow.concurrency.cancel-in-progress == false) 'copying must not be canceled midway'
+  let job = $workflow.jobs.mirror
+  check ($job.runs-on == fjx-release and $job.timeout-minutes == 20) 'mirror must use the bounded existing release runner'
+  let checkout = $job.steps.0
+  check ($checkout.run | str contains 'git fetch --no-tags origin refs/heads/main') 'release events must never execute code from old release tags'
+  check (not ($checkout | to json | str contains 'secrets.')) 'checkout must not consume the GitHub credential'
+  let copier = $job.steps.1
+  check ($copier.env.GH_RELEASE_MIRROR_TOKEN == '${{ secrets.GH_RELEASE_MIRROR_TOKEN }}') 'GitHub credential must be scoped to the copy step'
+  check ($copier.run == 'nu --no-config-file scripts/github-mirror.nu') 'workflow must run the tested copier'
+}
+
 def main [] {
   cd $project_dir
   test-package-contract
   test-ci-contract
   test-forgejo-ci-contract
+  test-github-mirror-contract
   test-documentation-links
   print 'repository checks passed'
 }

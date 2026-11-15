@@ -1,0 +1,35 @@
+name: Mirror GitHub releases
+
+on:
+  release:
+    types: [published, edited]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: fjx-github-releases
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: fjx-release
+    timeout-minutes: 20
+    steps:
+      - name: Check out trusted main
+        env:
+          CHECKOUT_URL: ${{ forgejo.server_url }}/${{ forgejo.repository }}.git
+        run: |
+          set -eu
+          git init .
+          git remote add origin "$CHECKOUT_URL"
+          git fetch --no-tags origin refs/heads/main
+          git checkout --detach FETCH_HEAD
+
+      - name: Copy and verify all published Forgejo releases
+        env:
+          FORGEJO_TOKEN: ${{ forgejo.token }}
+          GH_RELEASE_MIRROR_TOKEN: ${{ secrets.GH_RELEASE_MIRROR_TOKEN }}
+        run: nu --no-config-file scripts/github-mirror.nu

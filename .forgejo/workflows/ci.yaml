@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   checks:
-    name: Rust and Nushell checks
+    name: Build and E2E
     runs-on: fjx-ci
     timeout-minutes: 5
     outputs:
@@ -24,7 +24,7 @@ jobs:
       - name: Check out the exact commit
         env:
           CHECKOUT_URL: ${{ forgejo.server_url }}/${{ forgejo.repository }}.git
-          CHECKOUT_SHA: ${{ forgejo.sha }}
+          CHECKOUT_SHA: ${{ forgejo.event.pull_request.head.sha || forgejo.sha }}
         run: |
           set -eu
           git init .
@@ -38,7 +38,7 @@ jobs:
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
 
-      - name: Run all checks
+      - name: Build and run local CLI tests
         run: nu --no-config-file scripts/check.nu
 
       - name: Check for a version bump
@@ -72,6 +72,9 @@ jobs:
             git fetch --no-tags origin "$CHECKOUT_SHA"
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
+
+      - name: Check release tooling
+        run: nu --no-config-file scripts/check.nu --full
 
       - name: Build, verify, and publish all six targets
         env:

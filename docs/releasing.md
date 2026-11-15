@@ -7,8 +7,8 @@ native Windows Rust tests and Clippy. Neither workflow provides native macOS tes
 
 ## Automatic Forgejo releases
 
-[The Forgejo workflow](../.forgejo/workflows/ci.yaml) runs the complete check
-script on PRs, pushes to `main`, and manual checks. PR jobs have a five-minute
+[The Forgejo workflow](../.forgejo/workflows/ci.yaml) runs the build and local CLI
+test gate on PRs, pushes to `main`, and manual checks. PR jobs have a five-minute
 timeout and use a prepared image on Dyad. The image includes the pinned Rust
 and Nushell tools and a precompiled dependency cache. Each job writes to its own
 container layer; there is no shared writable Cargo cache or container socket.
@@ -19,8 +19,10 @@ and merge or push to Forgejo `main`. The workflow compares `release.toml` before
 and after the push. An unchanged version skips publication; decreases and
 inconsistent version files fail. Initial repository imports do not publish.
 
-The release job has a separate runner slot and a 45-minute timeout. It builds
-all six targets from `release-targets.toml` with the pinned cargo-zigbuild image,
+The release job has a separate runner slot and a 45-minute timeout. It first runs
+`nu --no-config-file scripts/check.nu --full` for maintenance and release-tool
+verification, then builds all six targets from `release-targets.toml` with the
+pinned cargo-zigbuild image,
 using the source commit timestamp for archive metadata. It verifies binary
 formats, archive inventory, executable modes, and checksums, and runs the two
 x86-64 Linux binaries with `--version`. ARM64 Linux, Windows, and macOS receive

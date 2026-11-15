@@ -58,7 +58,7 @@ output must never disclose tokens.
   values. See [README output contracts](../README.md#output-contracts).
 - Unsafe Rust is denied except in `config/windows.rs`, whose documented Windows
   API calls use owned handles and aligned buffers. There is no public library API.
-  Runtime dependencies stay limited to those listed in [AGENTS.md](../AGENTS.md).
+  Runtime dependencies stay limited to those declared in [Cargo.toml](../Cargo.toml).
 
 ## Verification
 

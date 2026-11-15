@@ -84,12 +84,18 @@ def test-forgejo-ci-contract [] {
   let checks = $workflow.jobs.checks
   check ($checks.timeout-minutes == 5) 'PR checks must have a five-minute budget'
   check ($checks.runs-on == fjx-ci) 'checks must use the prepared runner'
-  check ($checks.steps | any {|step| ($step.run? | default '') == 'nu --no-config-file scripts/check.nu' }) 'Forgejo must run the complete check entry point'
+  check ($checks.steps | any {|step| ($step.run? | default '') == 'nu --no-config-file scripts/check.nu' }) 'Forgejo must run the local build and E2E entry point'
   let release = $workflow.jobs.release
   check ($release.needs == checks) 'release publication must wait for checks'
   check ($release.runs-on != $checks.runs-on) 'release builds must have a separate runner slot'
   for condition in ["forgejo.event_name == 'push'" "forgejo.ref == 'refs/heads/main'" "needs.checks.outputs.release == 'true'"] {
     check ($release.if | str contains $condition) 'release must require a checked main version bump'
+  }
+  let candidate = $checks.steps | where {|step| ($step.id? | default '') == version } | first
+  let publisher = $release.steps | last
+  for step in [$candidate $publisher] {
+    check ($step.env.BEFORE_SHA == '${{ forgejo.event.before }}' and $step.env.CHECKOUT_SHA == '${{ forgejo.sha }}') 'candidate and publisher must receive the same exact push range'
+    check ($step.env.FORGEJO_EVENT_NAME == '${{ forgejo.event_name }}' and $step.env.FORGEJO_REF == '${{ forgejo.ref }}') 'publication context guards must receive the actual workflow event'
   }
   check ($workflow.concurrency.cancel-in-progress == "${{ forgejo.ref != 'refs/heads/main' }}") 'main publication must not be canceled by later pushes'
   let text = open --raw .forgejo/workflows/ci.yaml

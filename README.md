@@ -123,8 +123,8 @@ Plain output is stable and short. Each tab separates fields and each line feed e
 ## Development and releases
 
 Use Rust 1.97.1 from `rust-toolchain.toml` and Nushell 0.112.2. Linux tests
-also require Git, Bash, `script` (util-linux), GNU coreutils, `tar`, `gzip`,
-`zip`, and `unzip`. Run the same checks as CI from the repository root:
+also require Git, Bash, and `script` (util-linux). Run the same build and E2E
+gate as CI from the repository root:
 
 ```sh
 nu --no-config-file scripts/check.nu
@@ -138,14 +138,25 @@ nix-shell --run 'nu --no-config-file scripts/check.nu'
 nix-shell --run 'cargo build --locked --release'
 ```
 
-The check script runs Cargo format, Clippy, tests, and docs, plus repository,
-release, and Forgejo automation tests and version validation. Forgejo checks PRs
-on a prepared Dyad runner with a five-minute timeout. A version increase merged
-or pushed to `main` triggers a separate six-target binary release after checks
-pass. Builds, archive checks, and Linux x86-64 runtime smoke checks precede
-publication; downloaded release assets must match the checked local files.
+The gate runs `cargo build --locked` and `cargo test --locked --all-targets`.
+Tests execute the built CLI against local HTTP servers, temporary repositories,
+and auth/config fixtures; they need no live Forgejo account or credentials.
+Forgejo checks the exact PR head in one **Build and E2E** job on a prepared Dyad
+runner with a five-minute timeout. Only PRs and pushes to `main` run automatically;
+new PR updates cancel superseded runs.
 
-GitHub CI runs the full checks on Ubuntu 24.04 and Rust tests and Clippy on
+For maintenance and before a release, run `nu --no-config-file scripts/check.nu --full`.
+This also runs format, Clippy, docs, repository and release-tool fixtures, and
+version validation. It additionally needs GNU coreutils, `tar`, `gzip`, `zip`,
+`unzip`, and `file`.
+
+A version increase merged or pushed to `main` triggers a separate six-target
+binary release after checks pass. Builds, archive checks, and Linux x86-64
+runtime smoke checks precede uploads to a draft. The release becomes public
+only after all twelve downloaded assets match the checked local files. PRs,
+manual checks, and unchanged versions never publish.
+
+GitHub CI runs the build and E2E gate on Ubuntu 24.04 and Rust tests and Clippy on
 native Windows. GitHub releases remain manual. Neither workflow provides native
 macOS runtime coverage.
 

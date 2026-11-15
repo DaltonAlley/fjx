@@ -390,7 +390,7 @@ def test-release-metadata-mutations [] {
   ] | str join (char nl) | save --raw ($fake_bin | path join curl)
   chmod 0755 ($fake_bin | path join git) ($fake_bin | path join curl)
   let revision = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-  for state in [title body draft prerelease tag] {
+  for state in [title body prerelease tag] {
     let output = $root | path join $"metadata-($state)"
     touch $output
     let result = run-release $root [publish-plan $revision 123 $output] {
@@ -533,7 +533,7 @@ def test-create-release [] {
     '  let body_index = $args | enumerate | where item == "--data-binary" | first | get index'
     '  let body_path = $args | get ($body_index + 1) | str substring 1..'
     '  let body = open --raw $body_path | from json'
-    '  if $body != {tag_name: "fjx/v1.2.3", name: "fjx (1.2.3)", body: "", draft: false, prerelease: false} { exit 9 }'
+    '  if $body != {tag_name: "fjx/v1.2.3", name: "fjx (1.2.3)", body: "", draft: true, prerelease: false} { exit 9 }'
     '  let output_index = $args | enumerate | where item == "--output" | first | get index'
     '  $body | insert id 42 | to json | save --force --raw ($args | get ($output_index + 1))'
     '  print --no-newline $env.FAKE_CREATE_STATUS'

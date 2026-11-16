@@ -2,7 +2,7 @@
 
 `fjx` is a small synchronous, single-binary Forgejo client for people and scripts.
 It provides stable output, private token storage, and HTTP requests that refuse
-redirects. Version 0.3.2 targets Forgejo 15.0.7.
+redirects. Version 0.4.0 targets Forgejo 15.0.7.
 
 - View repositories; manage issues, pull requests, and reviews.
 - Inspect action runs and dispatch workflows.
@@ -36,8 +36,8 @@ Verify the checksum before extracting. For example, on Linux x86-64 with glibc,
 run these commands in the download directory:
 
 ```sh
-sha256sum --check fjx-0.3.2-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar -xzf fjx-0.3.2-x86_64-unknown-linux-gnu.tar.gz
+sha256sum --check fjx-0.4.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf fjx-0.4.0-x86_64-unknown-linux-gnu.tar.gz
 ./fjx --version
 ```
 

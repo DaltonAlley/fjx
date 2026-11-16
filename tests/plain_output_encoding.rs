@@ -207,7 +207,7 @@ fn pull_plain_fields_are_reversible_and_json_keeps_original_values() {
         &json_output,
         &json!({
             "kind": "pull_request", "number": 8, "title": RAW, "body": RAW,
-            "html_url": RAW, "author": RAW, "state": "open", "draft": false,
+            "html_url": RAW, "author": RAW, "author_id": null, "state": "open", "draft": false,
             "mergeable": true, "base": RAW, "head": RAW, "head_sha": RAW,
             "merged": false, "merged_at": null, "merge_commit_sha": null,
             "labels": [], "assignees": [], "milestone": null,

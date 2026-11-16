@@ -28,6 +28,8 @@ pub(crate) enum Command {
     AuthSetupGit,
     AuthGitCredential { operation: GitCredentialOperation },
     RepoView,
+    McpServe,
+    McpConfig,
     Org(OrgArgs),
     Team(TeamArgs),
     Issue(IssueArgs),
@@ -820,6 +822,8 @@ fn parse_parser(mut parser: lexopt::Parser) -> Result<Args, Error> {
 )]
 fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
     match words {
+        [a, b] if a == "mcp" && b == "serve" => Ok(Command::McpServe),
+        [a, b] if a == "mcp" && b == "config" => Ok(Command::McpConfig),
         [a, ..] if a == "org" => parse_org(&words[1..], o).map(Command::Org),
         [a, ..] if a == "team" => parse_team(&words[1..], o).map(Command::Team),
         [a, b] if a == "webhook" && b == "list" => Ok(Command::Webhook(WebhookArgs::List {

@@ -585,8 +585,17 @@ pub(crate) fn auth_lock(path: &Path) -> Result<fs::File, Error> {
     validate_token_file_security(&metadata)?;
     #[cfg(windows)]
     validate_open_token_file(&file)?;
-    file.lock()
-        .map_err(|_| Error::local("could not lock saved authentication"))?;
+    if crate::http::has_request_control() {
+        crate::http::checkpoint()?;
+        file.try_lock().map_err(|_| {
+            Error::context(
+                "saved authentication is busy; retry when the other login or refresh finishes",
+            )
+        })?;
+    } else {
+        file.lock()
+            .map_err(|_| Error::local("could not lock saved authentication"))?;
+    }
     Ok(file)
 }
 
@@ -761,6 +770,31 @@ mod tests {
             config.token(&first).map(|token| token.0),
             Some("first".to_owned())
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn mcp_refresh_does_not_wait_for_another_authentication_lock() {
+        use std::sync::{Arc, Mutex, atomic::AtomicBool};
+        use std::time::{Duration, Instant};
+        let root = std::env::temp_dir().join(format!("fjx-mcp-auth-lock-{}", std::process::id()));
+        let path = root.join("hosts.json");
+        let lock = super::auth_lock(&path).unwrap_or_else(|e| panic!("{e}"));
+        let control = crate::http::RequestControl {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            deadline: Instant::now() + Duration::from_secs(30),
+            secrets: Arc::new(Mutex::new(Vec::new())),
+        };
+        crate::http::controlled(control, || {
+            let error = super::auth_lock(&path)
+                .err()
+                .unwrap_or_else(|| panic!("lock must be busy"));
+            assert_eq!(error.code(), 3);
+        });
+        drop(lock);
+        let acquired = super::auth_lock(&path).unwrap_or_else(|e| panic!("{e}"));
+        drop(acquired);
+        fs::remove_dir_all(root).unwrap_or_else(|e| panic!("{e}"));
     }
 
     #[test]

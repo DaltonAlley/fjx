@@ -10,6 +10,55 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ERROR_BODY_BYTES: u64 = 64 * 1024;
 const MAX_ERROR_MESSAGE_CHARS: usize = 300;
 
+// Set only by the MCP worker. Ordinary CLI calls retain their existing policy.
+#[derive(Clone)]
+pub(crate) struct RequestControl {
+    pub(crate) cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) deadline: std::time::Instant,
+    pub(crate) secrets: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+thread_local! {
+    static CONTROL: std::cell::RefCell<Option<RequestControl>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(crate) fn controlled<T>(control: RequestControl, run: impl FnOnce() -> T) -> T {
+    CONTROL.with(|slot| *slot.borrow_mut() = Some(control));
+    let result = run();
+    CONTROL.with(|slot| *slot.borrow_mut() = None);
+    result
+}
+
+pub(crate) fn has_request_control() -> bool {
+    CONTROL.with(|slot| slot.borrow().is_some())
+}
+
+fn timeout(default: Duration) -> Duration {
+    CONTROL.with(|slot| {
+        slot.borrow().as_ref().map_or(default, |control| {
+            control
+                .deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .min(Duration::from_secs(15))
+                .max(Duration::from_millis(1))
+        })
+    })
+}
+
+pub(crate) fn checkpoint() -> Result<(), Error> {
+    CONTROL.with(|slot| {
+        if let Some(control) = slot.borrow().as_ref() {
+            if control.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(Error::network("MCP request cancelled"));
+            }
+            if std::time::Instant::now() >= control.deadline {
+                return Err(Error::network("MCP request deadline exceeded"));
+            }
+        }
+        Ok(())
+    })
+}
+
 #[derive(serde::Deserialize)]
 pub(crate) struct OAuthGrant {
     pub(crate) access_token: String,
@@ -20,11 +69,12 @@ pub(crate) struct OAuthGrant {
 
 /// OAuth errors deliberately omit server bodies: they can echo codes or tokens.
 pub(crate) fn oauth_token(host: &Host, body: &serde_json::Value) -> Result<OAuthGrant, Error> {
+    checkpoint()?;
     let bytes =
         serde_json::to_vec(body).map_err(|_| Error::local("could not encode OAuth request"))?;
     let agent = ureq::AgentBuilder::new()
         .redirects(0)
-        .timeout(Duration::from_mins(1))
+        .timeout(timeout(Duration::from_mins(1)))
         .build();
     let result = agent
         .post(&host.web_url("login/oauth/access_token"))
@@ -55,6 +105,7 @@ pub(crate) fn oauth_token(host: &Host, body: &serde_json::Value) -> Result<OAuth
     if bytes.len() as u64 > MAX_ERROR_BODY_BYTES {
         return Err(Error::data("OAuth token response exceeds 64 KiB"));
     }
+    checkpoint()?;
     let grant: OAuthGrant =
         serde_json::from_slice(&bytes).map_err(|_| Error::data("invalid OAuth token response"))?;
     if !grant.token_type.eq_ignore_ascii_case("bearer") || grant.expires_in == 0 {
@@ -85,6 +136,13 @@ impl Client {
             .timeout_read(Duration::from_mins(1))
             .timeout_write(Duration::from_mins(1))
             .build();
+        CONTROL.with(|slot| {
+            if let Some(control) = slot.borrow().as_ref()
+                && let Ok(mut secrets) = control.secrets.lock()
+            {
+                secrets.push(token.as_str().to_owned());
+            }
+        });
         Self { agent, host, token }
     }
 
@@ -98,6 +156,7 @@ impl Client {
         relative: &str,
         body: Option<&[u8]>,
     ) -> Result<Response, Error> {
+        checkpoint()?;
         let url = self.host.api_url(relative);
         let request = self.request(method, &url);
         let result = if let Some(bytes) = body {
@@ -128,8 +187,13 @@ impl Client {
     }
 
     fn request(&self, method: &str, url: &str) -> ureq::Request {
-        self.agent
-            .request(method, url)
+        let request = self.agent.request(method, url);
+        let request = if has_request_control() {
+            request.timeout(timeout(Duration::from_secs(15)))
+        } else {
+            request
+        };
+        request
             .set(
                 "Authorization",
                 &format!("{} {}", self.token.scheme(), self.token.as_str()),
@@ -158,6 +222,7 @@ impl Client {
                 response.status()
             )));
         }
+        checkpoint()?;
         let has_next = response
             .header("Link")
             .is_some_and(|value| value.split(',').any(|part| part.contains("rel=\"next\"")));
@@ -175,6 +240,7 @@ impl Client {
             .take(MAX_RESPONSE_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(|error| Error::network(format!("could not read Forgejo response: {error}")))?;
+        checkpoint()?;
         if bytes.len() as u64 > MAX_RESPONSE_BYTES {
             return Err(Error::data("Forgejo response exceeds 16 MiB"));
         }
@@ -220,6 +286,39 @@ fn format_error_message(bytes: &[u8], token: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{MAX_ERROR_MESSAGE_CHARS, format_error_message};
+
+    #[test]
+    fn request_control_bounds_time_and_observes_cancellation() {
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+        use std::time::{Duration, Instant};
+        let control = super::RequestControl {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            deadline: Instant::now() + Duration::from_secs(30),
+            secrets: Arc::new(Mutex::new(Vec::new())),
+        };
+        assert!(!super::has_request_control());
+        super::controlled(control.clone(), || {
+            assert!(super::checkpoint().is_ok());
+            assert!(super::timeout(Duration::from_mins(1)) <= Duration::from_secs(15));
+            control.cancelled.store(true, Ordering::Relaxed);
+            assert!(super::checkpoint().is_err());
+        });
+        assert!(!super::has_request_control());
+        assert_eq!(
+            super::timeout(Duration::from_mins(1)),
+            Duration::from_mins(1)
+        );
+        let expired = super::RequestControl {
+            deadline: Instant::now(),
+            ..control
+        };
+        expired.cancelled.store(false, Ordering::Relaxed);
+        super::controlled(expired, || assert!(super::checkpoint().is_err()));
+        assert!(super::checkpoint().is_ok());
+    }
 
     #[test]
     fn error_message_is_bounded_redacted_and_escaped() {

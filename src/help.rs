@@ -21,6 +21,7 @@ const ISSUE: &[&str] = &[
     "updated_at",
 ];
 const PULL: &[&str] = &[
+    "author_id",
     "kind",
     "number",
     "title",
@@ -890,6 +891,24 @@ static COMMANDS: &[CommandMeta] = &[
         false
     ),
     command!(
+        "mcp serve",
+        "fjx mcp serve --host URL",
+        [],
+        "fjx mcp serve --host https://forge.example",
+        &[],
+        false,
+        false
+    ),
+    command!(
+        "mcp config",
+        "fjx mcp config --host URL --json",
+        [],
+        "fjx mcp config --host https://forge.example --json",
+        &[],
+        false,
+        false
+    ),
+    command!(
         "api",
         "fjx api PATH",
         [
@@ -932,6 +951,7 @@ static COMMANDS: &[CommandMeta] = &[
 ];
 
 const GROUPS: &[&str] = &[
+    "mcp",
     "auth",
     "repo",
     "issue",
@@ -989,7 +1009,7 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
             env!("CARGO_PKG_VERSION"),
             " - a small Forgejo client\n"
         ));
-        text.push_str("\nUsage: fjx COMMAND [ACTION] [OPTIONS]\nCommands: auth, repo, issue, pr, run, release, label, milestone, branch, workflow\n  fjx api PATH\n  fjx help [COMMAND [ACTION]]\n  fjx schema [COMMAND [ACTION]] --json\n  fjx --version\n\nExit codes: 0 success, 1 unsuccessful work, 2 usage, 3 context/auth,\n4 network/TLS/timeout, 5 Forgejo HTTP, 6 safety, 7 incompatible data,\n8 local file/VCS, 130 interrupted\n");
+        text.push_str("\nUsage: fjx COMMAND [ACTION] [OPTIONS]\nCommands: auth, repo, issue, pr, run, release, label, milestone, branch, workflow, webhook, mcp\n  fjx api PATH\n  fjx help [COMMAND [ACTION]]\n  fjx schema [COMMAND [ACTION]] --json\n  fjx --version\n\nExit codes: 0 success, 1 unsuccessful work, 2 usage, 3 context/auth,\n4 network/TLS/timeout, 5 Forgejo HTTP, 6 safety, 7 incompatible data,\n8 local file/VCS, 130 interrupted\n");
     } else if commands.len() == 1 && !(path.len() == 1 && GROUPS.contains(&path[0].as_str())) {
         let command = commands[0];
         writeln!(text, "Usage: {}", command.usage).map_err(format_error)?;
@@ -1174,6 +1194,8 @@ pub(crate) fn output_fields(command: &crate::args::Command) -> Option<&'static [
         ),
         Command::Workflow(_) => ("workflow", "dispatch"),
         Command::Webhook(args) => ("webhook", args.action()),
+        Command::McpServe => ("mcp", "serve"),
+        Command::McpConfig => ("mcp", "config"),
         Command::AuthGitCredential { .. }
         | Command::Api(_)
         | Command::Help { .. }

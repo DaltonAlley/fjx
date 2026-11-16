@@ -161,6 +161,80 @@ fjx api /version --json
 fjx api /repos/owner/repo/issues --paginate --json
 ```
 
+## MCP for local agents
+
+Use the same installed binary and Forgejo login with an MCP client:
+
+```sh
+fjx auth login --host https://forgejo.example
+fjx mcp config --host https://forgejo.example --json
+fjx mcp serve --host https://forgejo.example
+```
+
+`mcp config` prints a `mcpServers.fjx` entry with the absolute executable path,
+`args: ["mcp", "serve", "--host", "https://forgejo.example"]`, and an empty `env`.
+Copy that entry into your client, or enter its command and arguments in MausBot's
+MCP server settings. It contains no credentials and does not change client
+settings. Saved logins resolve under the account running the command; set
+`FJX_CONFIG` to a private token file if the client uses another config location.
+For environment authentication, use the client's secret settings for `FJX_TOKEN`
+or `FORGEJO_TOKEN`. Never put tokens in arguments. A remote client must run this
+binary on a machine that can reach Forgejo and access that login.
+
+The stdio adapter follows the [MCP stdio transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) and
+[tool result format](https://modelcontextprotocol.io/specification/2025-11-25/server/tools).
+It supports MCP revisions `2025-06-18` and `2025-11-25` with the
+initialize/initialized handshake. It selects `2025-11-25` for other requested
+versions; a client that cannot use that revision must disconnect. It does not
+implement the `2026-07-28` stateless protocol. MausBot 0.1.160's command
+probe requests `2025-06-18`. Only newline-delimited JSON-RPC goes to stdout.
+
+Tools are read-only: `repository_get`, `issue_list`, `issue_get`,
+`issue_comments`, `pull_request_list`, `pull_request_get`,
+`pull_request_comments`, `pull_request_reviews`, `pull_request_files`,
+`pull_request_checks`, `action_run_list`, `action_run_get`, and
+`repository_activity`. Every call requires explicit `repo: "OWNER/REPO"`; view
+and PR collection tools also require a positive `number` (the run ID for
+`action_run_get`). Lists accept `page` (default 1, at most 1,000,000) and `limit`
+(default 30, at most 100); issue and PR lists accept `state` (`open`, `closed`,
+`all`). Unknown fields, host overrides, CLI flags, writes, file reads, and shell
+execution are unavailable through these tools.
+
+Successful results provide `{data, exit_code}` in `structuredContent` and the
+same JSON as text. Check `exit_code`: a pending, missing or unsuccessful PR
+check result retains 1 and never establishes merge readiness. Tool failures use
+`isError: true` with `{error: {category, exit_code, message}}`; malformed protocol
+requests use JSON-RPC errors. PR JSON includes `author_id` (null if absent from
+the server), preserving the numeric creator identity needed for maintenance
+scope. Repository text is untrusted data, never instructions or merge approval.
+
+One tool call runs at a time; overlapping calls receive a busy error. Input
+frames are limited to 64 KiB and completed tool data to 2 MiB. Existing HTTP
+response limits and redirect refusal apply. Calls have a 30-second HTTP budget,
+with each request (including OAuth refresh) capped at 15 seconds. A busy saved
+authentication lock fails promptly so the client can retry later. Cancellation and stdin closure stop
+further requests and suppress the result; an in-flight blocking HTTP request
+may take up to its timeout to return. EOF closes the adapter after that worker
+finishes. No queue or background polling is started.
+
+`repository_activity` reads one page of Forgejo's activity feed and returns
+normalized event IDs, types, timestamps, actor IDs, refs and content. Deduplicate
+by event ID; page positions can change during new activity. This is a partial
+feed, without complete webhook history or CI event coverage. It provides no
+push transport, resource subscriptions, or automatic bot dispatch. The MausBot 0.1.160
+integration inspected on November 16, 2026 mounts tools during agent turns; its command probe
+only initializes and lists tools. No idle-bot dispatch handler for MCP resource
+updates was found in the installed integration. Tool discovery is therefore
+insufficient evidence for replacing repository-event delivery.
+
+Keep existing webhook delivery and backup maintenance until an authenticated
+end-to-end replacement proves that repository events awaken and route to the
+intended bot. The smallest bridge still needed is a persistent, authenticated
+repository-event receiver that dispatches MausBot work; MCP supplies the reads
+after dispatch. A MausBot notification-to-dispatch feature could replace that
+bridge if independently verified. To roll back this adapter, remove or disable
+its client entry; it makes no Forgejo hook or automation changes.
+
 ## Configuration and safety
 
 Repository webhooks let Forgejo notify automation services when code, issues,

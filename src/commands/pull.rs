@@ -167,6 +167,8 @@ fn request_review(
 #[derive(Deserialize)]
 struct User {
     login: String,
+    #[serde(default)]
+    id: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -214,6 +216,7 @@ struct PullRecord {
     body: String,
     html_url: String,
     author: String,
+    author_id: Option<u64>,
     state: &'static str,
     draft: bool,
     mergeable: Option<bool>,
@@ -262,6 +265,7 @@ impl TryFrom<PullResponse> for PullRecord {
             body: value.body,
             html_url: value.html_url,
             author: value.user.login,
+            author_id: value.user.id,
             state,
             draft: value.draft,
             mergeable: value.mergeable,

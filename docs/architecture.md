@@ -4,6 +4,15 @@
 `src/main.rs` parses arguments, dispatches one command, and writes a completed
 `Outcome` to stdout. Errors go to stderr with a categorized exit code. This
 boundary prevents partial success output when a request or later page fails.
+`mcp serve` is an explicit stdio protocol mode: its main thread reads frames and
+one worker runs the same synchronous read commands. It adds no async runtime or
+network listener. `mcp config` emits a client configuration without credentials.
+The MCP adapter fixes the host, validates typed tool arguments, bounds frames and
+results, and redacts active HTTP credentials before serializing either result
+format. A thread-local HTTP control limits each request and checks cancellation
+between requests; an in-flight blocking request finishes within its timeout.
+Repository activity is a partial pull feed, not a webhook receiver or bot wakeup
+mechanism. See the [MCP setup and limits](../README.md#mcp-for-local-agents).
 
 ## Module ownership
 
@@ -15,6 +24,7 @@ boundary prevents partial success output when a request or later page fails.
 | `repo` | Owner/repository validation and Git/jj remote inference. |
 | `context` | Resolve explicit flags, environment, remotes, saved host, and token source. |
 | `config` | Token validation, private-file checks, persistence, and credential lookup. Windows system calls are isolated in `config/windows.rs`; descriptor rules in `config/acl.rs` are tested on every platform. |
+| `mcp` | Explicit stdio MCP lifecycle, read-only tool schemas, bounded dispatch and results. |
 | `http` | Synchronous authenticated requests, redirect refusal, bounded response reads, and HTTP errors. |
 | `oauth` | Public-client browser authorization, PKCE S256, bounded loopback callbacks, token refresh, and platform browser/RNG integration. |
 | `commands` | Typed Forgejo operations, raw API path rules, pagination, and command outcomes. |

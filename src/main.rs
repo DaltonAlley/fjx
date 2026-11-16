@@ -6,6 +6,7 @@ mod error;
 mod help;
 mod host;
 mod http;
+mod mcp;
 mod oauth;
 mod output;
 mod repo;
@@ -56,6 +57,8 @@ fn run(args: &Args) -> Result<Outcome, Error> {
         Command::AuthGitCredential { operation } => {
             commands::auth::git_credential(args, *operation)
         }
+        Command::McpServe => mcp::serve(args),
+        Command::McpConfig => mcp::config(args),
         Command::RepoView => commands::repo::view(args),
         Command::Issue(command) => commands::issue::run(args, command),
         Command::Pull(command) => commands::pull::run(args, command),

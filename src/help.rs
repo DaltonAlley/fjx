@@ -3,6 +3,32 @@ use crate::output::Outcome;
 use serde::Serialize;
 use std::fmt::Write;
 
+const ORGANIZATION: &[&str] = &[
+    "kind",
+    "id",
+    "name",
+    "full_name",
+    "description",
+    "email",
+    "website",
+    "location",
+    "visibility",
+    "repo_admin_change_team_access",
+];
+const TEAM: &[&str] = &[
+    "kind",
+    "id",
+    "name",
+    "description",
+    "permission",
+    "units_map",
+    "includes_all_repositories",
+    "can_create_org_repo",
+];
+const MEMBER: &[&str] = &["kind", "id", "login", "full_name"];
+const ORG_REPO: &[&str] = &["kind", "id", "full_name", "private", "html_url"];
+const ORG_RESULT: &[&str] = &["kind", "action", "ok", "target"];
+const JSON_INPUT: &str = "--input PATH|- (JSON object from a file or stdin)";
 const RESULT: &[&str] = &["kind", "action", "ok", "number", "html_url"];
 const WEBHOOK: &[&str] = &["id", "type", "active", "events", "branch_filter"];
 const WEBHOOK_RESULT: &[&str] = &["kind", "action", "ok", "id"];
@@ -209,8 +235,11 @@ impl CommandMeta {
                 "issue create" | "milestone create" => &["--title"],
                 "pr create" => &["--head", "--title"],
                 "pr review" => &["--event"],
-                "pr merge" | "branch delete" | "webhook delete" => &["--yes"],
-                "webhook create" | "webhook edit" => &["--input"],
+                "pr merge" | "branch delete" | "webhook delete" | "org delete"
+                | "org remove-member" | "team delete" | "team remove-member"
+                | "team remove-repo" => &["--yes"],
+                "webhook create" | "webhook edit" | "org create" | "org edit" | "team create"
+                | "team edit" => &["--input"],
                 "release create" => &["--tag", "--title"],
                 "label create" => &["--name", "--color"],
                 "workflow dispatch" => &["--ref"],
@@ -220,13 +249,20 @@ impl CommandMeta {
             ..ArgumentMetadata::default()
         };
         let names: &[&str] = match self.name {
+            "org list" => &["user"],
+            "org view" | "org edit" | "org delete" | "org members" | "org repos" | "team list"
+            | "team create" => &["org"],
+            "org remove-member" => &["org", "user"],
+            "team add-member" | "team remove-member" => &["id", "user"],
+            "team add-repo" | "team remove-repo" => &["id", "repo"],
             "auth git-credential" => &["operation"],
             "issue view" | "issue comments" | "issue comment" | "issue edit" | "issue close"
             | "issue reopen" | "pr view" | "pr comments" | "pr comment" | "pr edit"
             | "pr close" | "pr reopen" | "pr reviews" | "pr files" | "pr request-review"
             | "pr diff" | "pr checks" | "pr review" | "pr merge" => &["number"],
             "pr review-comments" => &["number", "review_id"],
-            "run view" | "run watch" | "webhook view" | "webhook edit" | "webhook delete"
+            "team view" | "team edit" | "team delete" | "team members" | "team repos"
+            | "run view" | "run watch" | "webhook view" | "webhook edit" | "webhook delete"
             | "webhook test" => &["id"],
             "release view" => &["tag"],
             "release upload" => &["release_id", "path"],
@@ -240,7 +276,7 @@ impl CommandMeta {
             .iter()
             .map(|name| Positional {
                 name,
-                required: !matches!(self.name, "help" | "schema"),
+                required: !matches!(self.name, "help" | "schema" | "org list"),
             })
             .collect();
         match self.name {
@@ -381,6 +417,177 @@ macro_rules! command {
 }
 
 static COMMANDS: &[CommandMeta] = &[
+    command!(
+        "org list",
+        "fjx org list [USER]",
+        [PAGING],
+        "fjx org list --all --json",
+        ORGANIZATION,
+        false,
+        false
+    ),
+    command!(
+        "org view",
+        "fjx org view ORG",
+        [],
+        "fjx org view my-org --json",
+        ORGANIZATION,
+        false,
+        false
+    ),
+    command!(
+        "org create",
+        "fjx org create --input PATH|-",
+        [JSON_INPUT],
+        "fjx org create --input org.json --dry-run",
+        ORGANIZATION,
+        true,
+        false
+    ),
+    command!(
+        "org edit",
+        "fjx org edit ORG --input PATH|-",
+        [JSON_INPUT],
+        "fjx org edit my-org --input org.json --dry-run",
+        ORGANIZATION,
+        true,
+        false
+    ),
+    command!(
+        "org delete",
+        "fjx org delete ORG --yes",
+        [],
+        "fjx org delete my-org --yes --dry-run",
+        ORG_RESULT,
+        true,
+        true
+    ),
+    command!(
+        "org members",
+        "fjx org members ORG",
+        [PAGING],
+        "fjx org members my-org --all --json",
+        MEMBER,
+        false,
+        false
+    ),
+    command!(
+        "org repos",
+        "fjx org repos ORG",
+        [PAGING],
+        "fjx org repos my-org --all --json",
+        ORG_REPO,
+        false,
+        false
+    ),
+    command!(
+        "org remove-member",
+        "fjx org remove-member ORG USER --yes",
+        [],
+        "fjx org remove-member my-org alice --yes --dry-run",
+        ORG_RESULT,
+        true,
+        true
+    ),
+    command!(
+        "team list",
+        "fjx team list ORG",
+        [PAGING],
+        "fjx team list my-org --all --json",
+        TEAM,
+        false,
+        false
+    ),
+    command!(
+        "team view",
+        "fjx team view ID",
+        [],
+        "fjx team view 7 --json",
+        TEAM,
+        false,
+        false
+    ),
+    command!(
+        "team create",
+        "fjx team create ORG --input PATH|-",
+        [JSON_INPUT],
+        "fjx team create my-org --input team.json --dry-run",
+        TEAM,
+        true,
+        false
+    ),
+    command!(
+        "team edit",
+        "fjx team edit ID --input PATH|-",
+        [JSON_INPUT],
+        "fjx team edit 7 --input team.json --dry-run",
+        TEAM,
+        true,
+        false
+    ),
+    command!(
+        "team delete",
+        "fjx team delete ID --yes",
+        [],
+        "fjx team delete 7 --yes --dry-run",
+        ORG_RESULT,
+        true,
+        true
+    ),
+    command!(
+        "team members",
+        "fjx team members ID",
+        [PAGING],
+        "fjx team members 7 --all --json",
+        MEMBER,
+        false,
+        false
+    ),
+    command!(
+        "team repos",
+        "fjx team repos ID",
+        [PAGING],
+        "fjx team repos 7 --all --json",
+        ORG_REPO,
+        false,
+        false
+    ),
+    command!(
+        "team add-member",
+        "fjx team add-member ID USER",
+        [],
+        "fjx team add-member 7 alice --dry-run",
+        ORG_RESULT,
+        true,
+        false
+    ),
+    command!(
+        "team remove-member",
+        "fjx team remove-member ID USER --yes",
+        [],
+        "fjx team remove-member 7 alice --yes --dry-run",
+        ORG_RESULT,
+        true,
+        true
+    ),
+    command!(
+        "team add-repo",
+        "fjx team add-repo ID OWNER/REPO",
+        [],
+        "fjx team add-repo 7 my-org/project --dry-run",
+        ORG_RESULT,
+        true,
+        false
+    ),
+    command!(
+        "team remove-repo",
+        "fjx team remove-repo ID OWNER/REPO --yes",
+        [],
+        "fjx team remove-repo 7 my-org/project --yes --dry-run",
+        ORG_RESULT,
+        true,
+        true
+    ),
     command!(
         "webhook list",
         "fjx webhook list",
@@ -932,6 +1139,8 @@ static COMMANDS: &[CommandMeta] = &[
 ];
 
 const GROUPS: &[&str] = &[
+    "org",
+    "team",
     "auth",
     "repo",
     "issue",
@@ -980,6 +1189,35 @@ fn format_error(error: std::fmt::Error) -> Error {
     Error::data(format!("could not format help: {error}"))
 }
 
+fn organization_help(name: &str, text: &mut String) {
+    if name.starts_with("org ") || name.starts_with("team ") {
+        text.push_str("Context: host and token required; no repository required. Team IDs come from team list/create. Lists use the standard 1,000-item cap.\n");
+    }
+    if name == "org list" {
+        text.push_str("Lists your memberships by default; USER lists that account's organizations visible to you.\n");
+    }
+    if matches!(name, "org create" | "org edit") {
+        text.push_str("Input fields: username (required on create; forbidden on edit), full_name, description, email, website, location, visibility (public/limited/private), repo_admin_change_team_access (boolean). Empty strings clear profile fields; unknown fields and null are rejected.\n");
+    }
+    if name == "org edit" {
+        text.push_str("Reads and preserves omitted profile fields, including in dry runs; concurrent edits can race. Renaming uses the raw API.\n");
+    }
+    if matches!(name, "team create" | "team edit") {
+        text.push_str("Input fields: name (required on create), description, permission (read/write/admin; create default read), units_map, includes_all_repositories, can_create_org_repo. Non-admin creation and permission changes require a nonempty explicit units_map, e.g. {\"repo.code\":\"read\",\"repo.issues\":\"write\"}. Unit values: none/read/write; external units: none/read. The map replaces all unit permissions; Forgejo derives the team's base permission from it. Admin grants all units and cannot combine with units_map. Unknown fields and null are rejected.\n");
+    }
+    if name == "team edit" {
+        text.push_str("Reads the team before editing, including in dry runs; preserves omitted values and supplies the current name/permission where Forgejo requires them. Concurrent edits can race. Owners team permission changes are refused.\n");
+    }
+    if name == "team add-member" {
+        text.push_str("Adding a team member also joins them to the organization. Forgejo enforces owner/admin permissions.\n");
+    }
+    if matches!(name, "team add-repo" | "team remove-repo") {
+        text.push_str(
+            "OWNER/REPO must belong to the team's organization; Forgejo enforces this.\n",
+        );
+    }
+}
+
 pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
     let commands = select(path)?;
     let mut text = String::new();
@@ -989,7 +1227,7 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
             env!("CARGO_PKG_VERSION"),
             " - a small Forgejo client\n"
         ));
-        text.push_str("\nUsage: fjx COMMAND [ACTION] [OPTIONS]\nCommands: auth, repo, issue, pr, run, release, label, milestone, branch, workflow\n  fjx api PATH\n  fjx help [COMMAND [ACTION]]\n  fjx schema [COMMAND [ACTION]] --json\n  fjx --version\n\nExit codes: 0 success, 1 unsuccessful work, 2 usage, 3 context/auth,\n4 network/TLS/timeout, 5 Forgejo HTTP, 6 safety, 7 incompatible data,\n8 local file/VCS, 130 interrupted\n");
+        text.push_str("\nUsage: fjx COMMAND [ACTION] [OPTIONS]\nCommands: auth, repo, org, team, issue, pr, run, release, label, milestone, branch, workflow, webhook\n  fjx api PATH\n  fjx help [COMMAND [ACTION]]\n  fjx schema [COMMAND [ACTION]] --json\n  fjx --version\n\nExit codes: 0 success, 1 unsuccessful work, 2 usage, 3 context/auth,\n4 network/TLS/timeout, 5 Forgejo HTTP, 6 safety, 7 incompatible data,\n8 local file/VCS, 130 interrupted\n");
     } else if commands.len() == 1 && !(path.len() == 1 && GROUPS.contains(&path[0].as_str())) {
         let command = commands[0];
         writeln!(text, "Usage: {}", command.usage).map_err(format_error)?;
@@ -1023,6 +1261,7 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
             writeln!(text, "Output fields: {}", command.output_fields.join(", "))
                 .map_err(format_error)?;
         }
+        organization_help(command.name, &mut text);
         if command.name == "api" {
             text.push_str("Safety: raw DELETE requires --yes; writes are never retried. Raw API output has no typed field schema.\n");
         }
@@ -1100,6 +1339,8 @@ pub(crate) fn output_fields(command: &crate::args::Command) -> Option<&'static [
         Command::AuthLogout => ("auth", "logout"),
         Command::AuthSetupGit => ("auth", "setup-git"),
         Command::RepoView => ("repo", "view"),
+        Command::Org(args) => ("org", args.action()),
+        Command::Team(args) => ("team", args.action()),
         Command::Issue(args) => (
             "issue",
             match args {

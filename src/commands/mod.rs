@@ -4,6 +4,7 @@ pub(crate) mod branch;
 pub(crate) mod issue;
 pub(crate) mod label;
 pub(crate) mod milestone;
+pub(crate) mod org;
 pub(crate) mod pull;
 pub(crate) mod release;
 pub(crate) mod repo;

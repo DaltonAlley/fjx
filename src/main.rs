@@ -59,6 +59,8 @@ fn run(args: &Args) -> Result<Outcome, Error> {
         }
         Command::McpServe => mcp::serve(args),
         Command::McpConfig => mcp::config(args),
+        Command::Org(command) => commands::org::run(args, command),
+        Command::Team(command) => commands::org::run_team(args, command),
         Command::RepoView => commands::repo::view(args),
         Command::Issue(command) => commands::issue::run(args, command),
         Command::Pull(command) => commands::pull::run(args, command),

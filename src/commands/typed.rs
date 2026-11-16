@@ -53,50 +53,23 @@ impl AdvertisedTotal {
     }
 }
 
-pub(crate) struct RepoClient {
+/// Host-scoped typed requests, shared by repository and organization commands.
+pub(crate) struct ApiClient {
     pub(crate) client: Client,
-    owner: String,
-    repo: String,
 }
 
-impl RepoClient {
+impl ApiClient {
     pub(crate) fn resolve(args: &Args) -> Result<Self, Error> {
-        let context = Context::resolve(args, true, true)?;
-        let repo = context
-            .repo
-            .ok_or_else(|| Error::context("repository is required"))?;
+        Self::from_context(Context::resolve(args, false, true)?)
+    }
+
+    fn from_context(context: Context) -> Result<Self, Error> {
         let token = context
             .token
             .ok_or_else(|| Error::context("token is required"))?;
         Ok(Self {
             client: Client::new(context.host, token),
-            owner: repo.owner().to_owned(),
-            repo: repo.name().to_owned(),
         })
-    }
-
-    pub(crate) fn path(&self, suffix: &str) -> String {
-        format!(
-            "repos/{}/{}/{}",
-            self.owner,
-            self.repo,
-            suffix.trim_start_matches('/')
-        )
-    }
-
-    /// Read the repository's default branch, which Forgejo requires as an
-    /// explicit pull-request base.
-    pub(crate) fn default_branch(&self) -> Result<String, Error> {
-        #[derive(serde::Deserialize)]
-        struct Repository {
-            default_branch: String,
-        }
-        let relative = format!("repos/{}/{}", self.owner, self.repo);
-        let (repository, _) = self.get::<Repository>(&relative, "repository")?;
-        if repository.default_branch.is_empty() {
-            return Err(Error::data("Forgejo returned an empty default branch"));
-        }
-        Ok(repository.default_branch)
     }
 
     pub(crate) fn get<T: DeserializeOwned>(
@@ -176,6 +149,61 @@ impl RepoClient {
     }
 }
 
+pub(crate) struct RepoClient {
+    api: ApiClient,
+    owner: String,
+    repo: String,
+}
+
+impl std::ops::Deref for RepoClient {
+    type Target = ApiClient;
+
+    fn deref(&self) -> &Self::Target {
+        &self.api
+    }
+}
+
+impl RepoClient {
+    /// Read the repository's default branch, which Forgejo requires as an
+    /// explicit pull-request base.
+    pub(crate) fn default_branch(&self) -> Result<String, Error> {
+        #[derive(serde::Deserialize)]
+        struct Repository {
+            default_branch: String,
+        }
+        let relative = format!("repos/{}/{}", self.owner, self.repo);
+        let (repository, _) = self.get::<Repository>(&relative, "repository")?;
+        if repository.default_branch.is_empty() {
+            return Err(Error::data("Forgejo returned an empty default branch"));
+        }
+        Ok(repository.default_branch)
+    }
+
+    pub(crate) fn resolve(args: &Args) -> Result<Self, Error> {
+        let context = Context::resolve(args, true, true)?;
+        let repo = context
+            .repo
+            .as_ref()
+            .ok_or_else(|| Error::context("repository is required"))?;
+        let owner = repo.owner().to_owned();
+        let repo = repo.name().to_owned();
+        Ok(Self {
+            api: ApiClient::from_context(context)?,
+            owner,
+            repo,
+        })
+    }
+
+    pub(crate) fn path(&self, suffix: &str) -> String {
+        format!(
+            "repos/{}/{}/{}",
+            self.owner,
+            self.repo,
+            suffix.trim_start_matches('/')
+        )
+    }
+}
+
 #[derive(Serialize)]
 struct RequestRecord<'a> {
     kind: &'static str,
@@ -233,7 +261,7 @@ pub(crate) fn read_body(source: &BodySource) -> Result<String, Error> {
 }
 
 pub(crate) fn collect_arrays<T: DeserializeOwned>(
-    repo: &RepoClient,
+    repo: &ApiClient,
     base: &str,
     paging: &PageArgs,
     noun: &str,

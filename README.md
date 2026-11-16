@@ -4,7 +4,7 @@
 It provides stable output, private token storage, and HTTP requests that refuse
 redirects. Version 0.4.0 targets Forgejo 15.0.7.
 
-- View repositories; manage issues, pull requests, and reviews.
+- View repositories; manage organizations, teams, issues, pull requests, and reviews.
 - Inspect action runs and dispatch workflows.
 - Publish releases and assets; manage labels, milestones, and branches.
 - Use readable views, stable tab-separated output, or compact JSON with selected fields.
@@ -235,6 +235,91 @@ after dispatch. A MausBot notification-to-dispatch feature could replace that
 bridge if independently verified. To roll back this adapter, remove or disable
 its client entry; it makes no Forgejo hook or automation changes.
 
+## Organizations and teams
+
+Organization and team commands need a host and login, with no repository context.
+`org list` lists your memberships; `org list USER` lists that user's organizations
+visible to your account. Team commands use the positive ID from `team list` or
+`team create`. All lists accept `--page`, `--limit`, and `--all`.
+
+```sh
+fjx org list --all --json
+fjx org view my-org --json
+fjx org members my-org --all
+fjx org repos my-org --all
+fjx team list my-org --all --json
+fjx team view 7 --json
+fjx team members 7 --all
+fjx team repos 7 --all
+```
+
+Create and edit accept a JSON object from `--input PATH` or `--input -` for stdin.
+For example, save this as `org.json`:
+
+```json
+{"username":"my-org","full_name":"My organization","visibility":"private"}
+```
+
+Run `fjx org create --input org.json --dry-run` to preview, then remove `--dry-run`
+to create it. For an update, save `{"description":"Updated description"}` to
+`org-edit.json` and run `fjx org edit my-org --input org-edit.json`.
+Organization input supports `username` (create only), `full_name`, `description`,
+`email`, `website`, `location`, `visibility` (`public`, `limited`, `private`), and
+`repo_admin_change_team_access` (boolean). Empty strings clear profile fields;
+unknown fields and null are rejected. The server defaults new organizations to
+public visibility when omitted. Organization edits read and preserve profile
+fields Forgejo would otherwise clear, including during dry runs.
+
+For a team, save this as `team.json`:
+
+```json
+{"name":"Developers","units_map":{"repo.code":"read","repo.issues":"write"},"includes_all_repositories":false,"can_create_org_repo":false}
+```
+
+```sh
+fjx team create my-org --input team.json --dry-run
+fjx team edit 7 --input team-edit.json --dry-run
+fjx team add-member 7 alice
+fjx team add-repo 7 my-org/project
+fjx team remove-repo 7 my-org/project --yes
+fjx team remove-member 7 alice --yes
+fjx org remove-member my-org alice --yes
+fjx team delete 7 --yes
+fjx org delete my-org --yes
+```
+
+For `team-edit.json`, use a partial object such as `{"description":"Maintainers"}`.
+Team input supports `name`, `description`, `permission` (`read`, `write`, `admin`),
+`units_map`, `includes_all_repositories`, and `can_create_org_repo`. Create defaults
+permission to `read` and requires a name. Non-admin creation and explicit
+non-admin permission changes require a nonempty `units_map`. Map keys are
+`repo.code`, `repo.issues`, `repo.ext_issues`, `repo.wiki`, `repo.ext_wiki`,
+`repo.pulls`, `repo.releases`, `repo.projects`, `repo.packages`, and `repo.actions`;
+values are `none`, `read`, or `write` (external issues/wiki allow only `none` or
+`read`). A supplied map replaces all unit permissions, and Forgejo derives the
+team's base permission from it. `admin` grants every unit and cannot combine
+with a map. Unknown fields and null are rejected. Edits read the team and preserve
+omitted values; changes to Owners team permissions are refused. Preservation
+reads can race concurrent edits.
+
+Adding a team member also joins them to the organization. Removing a team member
+removes only that team's membership; `org remove-member` removes organization
+membership and associated team access. A team repository must belong to its
+organization. Forgejo enforces account permissions, last-owner protection, and
+organization deletion rules. Every delete or removal requires `--yes`, including
+a dry run; other writes reject `--yes`. Every write supports `--dry-run`.
+
+Commands provide stable plain records and JSON with `--fields` projection.
+Plain columns are: organization `id/name/visibility/full_name`; team
+`id/name/permission/includes_all_repositories/can_create_org_repo/description`;
+member `id/login/full_name`; repository `id/full_name/private/html_url`;
+mutation `action/target/ok`. Columns are tab-separated and control characters
+are escaped as described below. `fjx schema org --json` and
+`fjx schema team --json` list all JSON fields. `fjx help org create` and
+`fjx help team create` describe the input contract. Organization renaming,
+public membership visibility, org repository creation, hooks, secrets, and
+runner administration remain available through `fjx api`.
+
 ## Configuration and safety
 
 Repository webhooks let Forgejo notify automation services when code, issues,
@@ -288,11 +373,11 @@ Tokens never appear in command arguments or user-facing output. The client accep
 
 Raw `api` paths sit below the selected host's `/api/v1/` path. They must stay relative. Raw DELETE requires `--yes`. Write requests accept `--dry-run`, which prints the planned request without sending it.
 
-Typed commands cover issue list, view, create, edit, comments, comment, close, and reopen; pull-request list, view, create, edit, files, comments, reviews, review-comments, request-review, diff, checks, comment, review, merge, close, and reopen; action-run list, view, and watch; release list, view, create, and upload; label list and create; milestone list and create; branch list and delete; and workflow dispatch. Lists default to 30 open items where state applies. `--all` follows Forgejo pages up to 1,000 items and fails instead of returning a cut-off list. Forgejo 15.0.7 has no draft field in its create-pull request body, so `pr create --draft` uses its default `WIP:` title prefix in the one create request. `pr create` without `--base` reads the repository's default branch, including during dry-run, and sends it as `base`. API errors include Forgejo's response `message`, truncated and escaped like plain output.
+Typed commands cover the organization and team workflows above; issue list, view, create, edit, comments, comment, close, and reopen; pull-request list, view, create, edit, files, comments, reviews, review-comments, request-review, diff, checks, comment, review, merge, close, and reopen; action-run list, view, and watch; release list, view, create, and upload; label list and create; milestone list and create; branch list and delete; and workflow dispatch. Lists default to 30 open items where state applies. `--all` follows Forgejo pages up to 1,000 items and fails instead of returning a cut-off list. Forgejo 15.0.7 has no draft field in its create-pull request body, so `pr create --draft` uses its default `WIP:` title prefix in the one create request. `pr create` without `--base` reads the repository's default branch, including during dry-run, and sends it as `base`. API errors include Forgejo's response `message`, truncated and escaped like plain output.
 
 `release view` identifies a release by tag. `release upload` instead requires the positive numeric Forgejo release ID returned by release list, view, or create; a tag is not accepted in that position. Uploads stream a regular file as `application/octet-stream`, default the asset name to the file name, and let `--name` override it. Workflow dispatch requires a workflow file and ref, accepts repeated unique `--field KEY=VALUE` inputs, and returns the created run ID, run number, and jobs.
 
-Every typed write accepts `--dry-run`, which validates local inputs and prints the planned request without sending it. Pull-request merge, branch delete, and raw DELETE require `--yes`, including for a dry run; other typed writes reject `--yes`. Read commands reject both write-safety flags.
+Every typed write accepts `--dry-run`, which validates local inputs and prints the planned request without sending it. Pull-request merge, branch/webhook delete, organization/team deletes and access removals, and raw DELETE require `--yes`, including for a dry run; other typed writes reject `--yes`. Read commands reject both write-safety flags.
 
 `pr checks` exits 1 unless all normalized checks succeed, and rejects contradictory success statuses or a response SHA different from the requested PR head. Forgejo's empty combined-status response (blank SHA/state, zero total, no statuses) reports the requested head with state `unknown`, an empty status list, and exit 1. This means no checks have been reported; it does not establish that checks passed. `pr merge --match-head SHA --yes` sends a server-side expected-head precondition; `--auto` requests server-side merge when checks succeed. `run watch` buffers output until the run ends: it emits one final record, exits 0 only for success, and exits 1 for every other conclusion. A timeout or poll error leaves stdout empty.
 

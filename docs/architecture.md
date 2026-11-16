@@ -31,7 +31,9 @@ mechanism. See the [MCP setup and limits](../README.md#mcp-for-local-agents).
 | `output` | Stable plain-field encoding, safe multiline human text, compact JSON, and field projection. |
 | `error` | Error categories and exit codes. |
 
-`commands/typed.rs` shares typed-command helpers. `commands/triage.rs` owns
+`commands/typed.rs` shares host-scoped `ApiClient` request and pagination helpers;
+`RepoClient` adds repository context. Organization and team commands use
+`ApiClient` without requiring a repository. `commands/triage.rs` owns
 metadata resolution and planned multi-step issue/PR edits. It resolves the full
 plan before sending writes, preserves unrelated labels, and reports completed
 requests if a later step fails. Assignee replacement is a documented read-modify-
@@ -93,7 +95,8 @@ is checked against FIPS digest vectors and the RFC 7636 S256 example.
 
 - Hosts accept HTTPS or loopback HTTP. The HTTP client follows no redirects.
 - Writes are not retried. Dry runs validate local inputs without sending writes.
-- Pull-request merges, branch deletion, and raw DELETE need explicit confirmation.
+- Pull-request merges, branch/webhook deletion, organization/team deletes and
+  access removals, and raw DELETE need explicit confirmation.
 - Pagination and run watching accumulate a final result before returning output.
 - Plain fields have reversible control-character escaping. JSON retains original
   values. See [README output contracts](../README.md#output-contracts).

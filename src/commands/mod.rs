@@ -10,4 +10,5 @@ pub(crate) mod repo;
 pub(crate) mod run;
 pub(crate) mod triage;
 pub(crate) mod typed;
+pub(crate) mod webhook;
 pub(crate) mod workflow;

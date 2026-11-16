@@ -65,6 +65,7 @@ fn run(args: &Args) -> Result<Outcome, Error> {
         Command::Milestone(command) => commands::milestone::run(args, command),
         Command::Branch(command) => commands::branch::run(args, command),
         Command::Workflow(command) => commands::workflow::run(args, command),
+        Command::Webhook(command) => commands::webhook::run(args, command),
         Command::Api(api) => commands::api::run(args, api),
         Command::Help { path } => help::render(path),
         Command::Schema { path } => help::schema(path),

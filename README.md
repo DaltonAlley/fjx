@@ -151,11 +151,43 @@ fjx milestone create -R owner/repo --title v1.2 --due 2026-09-30T23:59:59Z
 fjx branch list -R owner/repo --all
 fjx branch delete -R owner/repo feature/old --yes
 fjx workflow dispatch -R owner/repo release.yml --ref main --field channel=stable
+fjx webhook list -R owner/repo --all --json
+fjx webhook create -R owner/repo --input hook.json --dry-run
+fjx webhook view -R owner/repo 1 --json
+fjx webhook edit -R owner/repo 1 --input hook-update.json --dry-run
+fjx webhook test -R owner/repo 1 --ref main
+fjx webhook delete -R owner/repo 1 --yes --dry-run
 fjx api /version --json
 fjx api /repos/owner/repo/issues --paginate --json
 ```
 
 ## Configuration and safety
+
+Repository webhooks let Forgejo notify automation services when code, issues,
+PRs or CI change. `webhook create` and `edit` accept JSON from `--input PATH|-`.
+Create requires `config.url` and a nonempty `events` array; it defaults to an
+active Forgejo hook using JSON POST. For example, a non-secret configuration is
+`{"config":{"url":"https://receiver.example/events"},"events":["push","issues","pull_request"]}`.
+Optional fields are `active`, `branch_filter`, `authorization_header` and
+`config.secret`. Edit changes supplied top-level fields; supplying `config`
+requires its URL. `{"active":false}` pauses an existing hook.
+
+Forgejo 17 resets omitted event, branch-filter and authorization fields on
+edit. fjx reads and preserves those fields, including during dry runs. This
+read-modify-write can race another editor. Signing-secret rotation and changes
+to workflow, action-run or package subscriptions require a replacement hook
+because Forgejo 17 ignores those edits; fjx rejects them before writing.
+
+Keep real receiver URLs and credentials in protected files or feed them through
+stdin from a secret store. Webhook output omits URLs, credentials and provider
+metadata; dry runs redact URLs, signing secrets and authorization headers.
+The typed commands support Forgejo JSON POST hooks; other providers use `api`.
+`webhook test` queues a push test; it does not prove delivery. Forgejo 17 has no
+delivery-history API: check **Settings → Webhooks → Recent Deliveries** and
+verify that the receiver handled the event. Available event names depend on the
+server version. The receiver must authenticate requests, handle duplicates and
+apply its own authorization rules. These commands configure subscriptions;
+they do not run a receiver or grant bots permission to merge.
 
 Common flags may go before or after command words: `--host URL`, `-R OWNER/REPO`, `--json`, `--dry-run`, and `--yes`. `FJX_HOST`, `FJX_REPO`, `FJX_TOKEN`, and `FORGEJO_TOKEN` provide non-interactive context. `FJX_CONFIG` selects the token store.
 

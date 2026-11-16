@@ -36,6 +36,7 @@ pub(crate) enum Command {
     Milestone(MilestoneArgs),
     Branch(BranchArgs),
     Workflow(WorkflowArgs),
+    Webhook(WebhookArgs),
     Api(ApiArgs),
     Help { path: Vec<String> },
     Schema { path: Vec<String> },
@@ -48,6 +49,29 @@ pub(crate) struct LoginArgs {
     pub(crate) web: bool,
     pub(crate) no_browser: bool,
     pub(crate) client_id: Option<String>,
+}
+
+#[derive(Debug)]
+pub(crate) enum WebhookArgs {
+    List { paging: PageArgs },
+    View { id: u64 },
+    Create { input: OsString },
+    Edit { id: u64, input: OsString },
+    Delete { id: u64 },
+    Test { id: u64, reference: Option<String> },
+}
+
+impl WebhookArgs {
+    pub(crate) const fn action(&self) -> &'static str {
+        match self {
+            Self::List { .. } => "list",
+            Self::View { .. } => "view",
+            Self::Create { .. } => "create",
+            Self::Edit { .. } => "edit",
+            Self::Delete { .. } => "delete",
+            Self::Test { .. } => "test",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -713,6 +737,38 @@ fn parse_parser(mut parser: lexopt::Parser) -> Result<Args, Error> {
 )]
 fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
     match words {
+        [a, b] if a == "webhook" && b == "list" => Ok(Command::Webhook(WebhookArgs::List {
+            paging: o.take_paging()?,
+        })),
+        [a, b] if a == "webhook" && b == "create" => Ok(Command::Webhook(WebhookArgs::Create {
+            input: o
+                .input
+                .take()
+                .ok_or_else(|| Error::usage("webhook create requires --input PATH|-"))?,
+        })),
+        [a, b, n] if a == "webhook" => {
+            let id = positive(n, "webhook ID")?;
+            Ok(Command::Webhook(match b.as_str() {
+                "view" => WebhookArgs::View { id },
+                "edit" => WebhookArgs::Edit {
+                    id,
+                    input: o
+                        .input
+                        .take()
+                        .ok_or_else(|| Error::usage("webhook edit requires --input PATH|-"))?,
+                },
+                "delete" => WebhookArgs::Delete { id },
+                "test" => WebhookArgs::Test {
+                    id,
+                    reference: o.reference.take(),
+                },
+                _ => {
+                    return Err(Error::usage(
+                        "unknown webhook command; run fjx webhook --help",
+                    ));
+                }
+            }))
+        }
         [a, b, n] if a == "issue" && b == "comments" => Ok(Command::Issue(IssueArgs::Comments {
             number: positive(n, "issue number")?,
             paging: o.take_paging()?,
@@ -1318,6 +1374,7 @@ fn subcommands(group: &str) -> &'static [&'static str] {
         "label" | "milestone" => &["list", "create"],
         "branch" => &["list", "delete"],
         "workflow" => &["dispatch"],
+        "webhook" => &["list", "view", "create", "edit", "delete", "test"],
         _ => &[],
     }
 }
@@ -1378,6 +1435,12 @@ fn command_help_path(words: &[String]) -> Result<Vec<String>, Error> {
 fn consume_help_flags(path: &[String], o: &mut Specific) -> Result<(), Error> {
     let group = path.first().map_or("", String::as_str);
     let command = path.get(1).map_or("", String::as_str);
+    if group == "webhook" && matches!(command, "create" | "edit") {
+        o.input.take();
+    }
+    if group == "webhook" && command == "test" {
+        o.reference.take();
+    }
     if group == "api" {
         o.method.take();
         o.input.take();

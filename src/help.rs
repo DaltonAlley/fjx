@@ -4,6 +4,8 @@ use serde::Serialize;
 use std::fmt::Write;
 
 const RESULT: &[&str] = &["kind", "action", "ok", "number", "html_url"];
+const WEBHOOK: &[&str] = &["id", "type", "active", "events", "branch_filter"];
+const WEBHOOK_RESULT: &[&str] = &["kind", "action", "ok", "id"];
 const ISSUE: &[&str] = &[
     "kind",
     "number",
@@ -207,7 +209,8 @@ impl CommandMeta {
                 "issue create" | "milestone create" => &["--title"],
                 "pr create" => &["--head", "--title"],
                 "pr review" => &["--event"],
-                "pr merge" | "branch delete" => &["--yes"],
+                "pr merge" | "branch delete" | "webhook delete" => &["--yes"],
+                "webhook create" | "webhook edit" => &["--input"],
                 "release create" => &["--tag", "--title"],
                 "label create" => &["--name", "--color"],
                 "workflow dispatch" => &["--ref"],
@@ -223,7 +226,8 @@ impl CommandMeta {
             | "pr close" | "pr reopen" | "pr reviews" | "pr files" | "pr request-review"
             | "pr diff" | "pr checks" | "pr review" | "pr merge" => &["number"],
             "pr review-comments" => &["number", "review_id"],
-            "run view" | "run watch" => &["id"],
+            "run view" | "run watch" | "webhook view" | "webhook edit" | "webhook delete"
+            | "webhook test" => &["id"],
             "release view" => &["tag"],
             "release upload" => &["release_id", "path"],
             "branch delete" => &["name"],
@@ -377,6 +381,60 @@ macro_rules! command {
 }
 
 static COMMANDS: &[CommandMeta] = &[
+    command!(
+        "webhook list",
+        "fjx webhook list",
+        [PAGING],
+        "fjx webhook list -R owner/repo --all --json",
+        WEBHOOK,
+        false,
+        false
+    ),
+    command!(
+        "webhook view",
+        "fjx webhook view ID",
+        [],
+        "fjx webhook view 1 --json",
+        WEBHOOK,
+        false,
+        false
+    ),
+    command!(
+        "webhook create",
+        "fjx webhook create --input PATH|-",
+        ["--input PATH|- (JSON file or stdin; never credentials in arguments)"],
+        "fjx webhook create --input hook.json --dry-run",
+        WEBHOOK,
+        true,
+        false
+    ),
+    command!(
+        "webhook edit",
+        "fjx webhook edit ID --input PATH|-",
+        ["--input PATH|- (partial JSON update)"],
+        "fjx webhook edit 1 --input hook.json --dry-run",
+        WEBHOOK,
+        true,
+        false
+    ),
+    command!(
+        "webhook delete",
+        "fjx webhook delete ID --yes",
+        [],
+        "fjx webhook delete 1 --yes --dry-run",
+        WEBHOOK_RESULT,
+        true,
+        true
+    ),
+    command!(
+        "webhook test",
+        "fjx webhook test ID",
+        ["--ref REF (optional commit, branch or tag)"],
+        "fjx webhook test 1 --ref main",
+        WEBHOOK_RESULT,
+        true,
+        false
+    ),
     command!(
         "auth login",
         "fjx auth login [--web | --with-token] [--client-id ID] [--no-browser]",
@@ -884,6 +942,7 @@ const GROUPS: &[&str] = &[
     "milestone",
     "branch",
     "workflow",
+    "webhook",
 ];
 
 fn select(path: &[String]) -> Result<Vec<&'static CommandMeta>, Error> {
@@ -966,6 +1025,16 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
         }
         if command.name == "api" {
             text.push_str("Safety: raw DELETE requires --yes; writes are never retried. Raw API output has no typed field schema.\n");
+        }
+        if matches!(command.name, "webhook create" | "webhook edit") {
+            text.push_str("Input: config {url, content_type: json, http_method: POST, secret}, events [names], active, branch_filter, authorization_header. Create defaults type to forgejo and active to true; config.url and nonempty events are required. Edit changes only supplied top-level fields; supplied config requires url. Other providers use fjx api.\nSafety: URLs, secrets and authorization headers are omitted from results and redacted in dry runs. Protect input files; prefer stdin from your secret store.\n");
+        }
+        if command.name == "webhook test" {
+            text.push_str("Queues a push test. Success means queued, not delivered. Forgejo 17 has no delivery-history API; inspect Recent Deliveries in repository Settings > Webhooks.\n");
+        }
+        if command.name == "webhook edit" {
+            text.push_str("Forgejo 17 resets omitted events, branch_filter and authorization_header. fjx reads and preserves them, even during dry runs; concurrent edits can race. Signing-secret rotation and workflow/action-run/package subscription changes require a replacement hook because the server ignores those edits.\n");
+            text.push_str("Hooks reporting every event require a replacement: the API hides Send everything mode, whose edits can lose CI/package subscriptions. Explicit all-event selections are indistinguishable and also refused, including dry runs.\n");
         }
         if command.name == "pr merge" {
             text.push_str("Safety: --match-head guards the expected head SHA; --auto requests server-side automatic merge.\n");
@@ -1104,6 +1173,7 @@ pub(crate) fn output_fields(command: &crate::args::Command) -> Option<&'static [
             },
         ),
         Command::Workflow(_) => ("workflow", "dispatch"),
+        Command::Webhook(args) => ("webhook", args.action()),
         Command::AuthGitCredential { .. }
         | Command::Api(_)
         | Command::Help { .. }

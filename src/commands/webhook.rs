@@ -279,6 +279,14 @@ fn preserve_edit(input: &mut Input, current: &Hook) -> Result<(), Error> {
     if current.provider != "forgejo" {
         return Err(Error::usage("webhook edit supports Forgejo hooks only"));
     }
+    if could_send_everything(&current.events) {
+        // GET exposes effective events but not SendEverything. PATCH clears
+        // that bit without setting workflow/action-run/package flags, so even
+        // resending the full event list cannot safely preserve this hook.
+        return Err(Error::usage(
+            "cannot safely edit an all-event hook: Forgejo hides Send everything mode; create a replacement hook",
+        ));
+    }
     if let Some(events) = &input.events {
         // Forgejo 17's PATCH handler does not update these event flags.
         let fixed = |events: &[String]| {
@@ -298,15 +306,24 @@ fn preserve_edit(input: &mut Input, current: &Hook) -> Result<(), Error> {
             ));
         }
     } else {
+        let has = |event: &str| current.events.iter().any(|e| e == event);
+        if has("pull_request_review_approved") != has("pull_request_review_rejected")
+            || has("pull_request_review_comment") != has("pull_request_comment")
+        {
+            return Err(Error::data("unsupported stored webhook review events"));
+        }
         let mut events = std::collections::BTreeSet::new();
         for event in &current.events {
             // Read responses use broad input aliases for narrower event flags.
             let event = match event.as_str() {
                 "issues" => "issues_only",
                 "pull_request" => "pull_request_only",
-                "pull_request_review_approved"
-                | "pull_request_review_rejected"
-                | "pull_request_review_comment" => "pull_request_review",
+                "pull_request_review_approved" | "pull_request_review_rejected" => {
+                    "pull_request_review"
+                }
+                // Forgejo 17's EventCheckers reports this through its
+                // PullRequestComment flag, not its PullRequestReview flag.
+                "pull_request_review_comment" => continue,
                 event => event,
             };
             if !known_event(event) {
@@ -328,6 +345,57 @@ fn preserve_edit(input: &mut Input, current: &Hook) -> Result<(), Error> {
         .authorization_header
         .get_or_insert_with(|| current.authorization_header.clone());
     Ok(())
+}
+
+fn could_send_everything(events: &[String]) -> bool {
+    let has = |event: &str| events.iter().any(|e| e == event);
+    // Forgejo 17 models/webhook/webhook.go: EventCheckers/EventsArray.
+    // An explicit selection of every event has the same response as
+    // SendEverything and must also be refused. Subsets remain editable.
+    [
+        "create",
+        "delete",
+        "fork",
+        "push",
+        "issues",
+        "issue_assign",
+        "issue_label",
+        "issue_milestone",
+        "issue_comment",
+        "pull_request",
+        "pull_request_assign",
+        "pull_request_label",
+        "pull_request_milestone",
+        "pull_request_comment",
+        "pull_request_review_approved",
+        "pull_request_review_rejected",
+        "pull_request_review_comment",
+        "pull_request_sync",
+        "wiki",
+        "repository",
+        "release",
+        "package",
+        "pull_request_review_request",
+        "action_run_failure",
+        "action_run_success",
+    ]
+    .into_iter()
+    .all(has)
+        && ["workflow_run_", "workflow_job_"]
+            .into_iter()
+            .all(|prefix| {
+                [
+                    "blocked",
+                    "cancelled",
+                    "failure",
+                    "running",
+                    "skipped",
+                    "success",
+                    "waiting",
+                ]
+                .into_iter()
+                .all(|state| has(&format!("{prefix}{state}")))
+            })
 }
 
 fn read_input(path: &OsString) -> Result<Input, Error> {

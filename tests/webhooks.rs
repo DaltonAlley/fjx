@@ -327,6 +327,7 @@ fn edit_preview_preserves_narrow_event_flags_and_redacts_stored_auth() {
     current["events"] = json!([
         "issues",
         "pull_request",
+        "pull_request_comment",
         "pull_request_review_approved",
         "pull_request_review_comment",
         "pull_request_review_rejected",
@@ -349,6 +350,7 @@ fn edit_preview_preserves_narrow_event_flags_and_redacts_stored_auth() {
         plan["body"]["events"],
         json!([
             "issues_only",
+            "pull_request_comment",
             "pull_request_only",
             "pull_request_review",
             "workflow_run_success"
@@ -376,4 +378,196 @@ fn unsupported_event_changes_and_secret_rotation_fail_before_writes() {
     assert!(!output.status.success());
     assert_private(&output);
     assert_eq!(mock.finish().len(), 1);
+}
+
+#[test]
+fn edits_round_trip_comment_and_review_subscriptions_independently() {
+    // Forgejo 17 reports review_comment through its PR-comment flag, while
+    // approved/rejected share a separate review flag (models/webhook/webhook.go).
+    for (stored, expected) in [
+        (
+            vec!["pull_request_comment", "pull_request_review_comment"],
+            vec!["pull_request_comment"],
+        ),
+        (
+            vec![
+                "pull_request_review_approved",
+                "pull_request_review_rejected",
+            ],
+            vec!["pull_request_review"],
+        ),
+        (
+            vec![
+                "pull_request_comment",
+                "pull_request_review_comment",
+                "pull_request_review_approved",
+                "pull_request_review_rejected",
+            ],
+            vec!["pull_request_comment", "pull_request_review"],
+        ),
+    ] {
+        let mut current = hook();
+        current["events"] = json!(stored);
+        let mock = Mock::new(vec![
+            response("200 OK", &current.to_string(), ""),
+            response("200 OK", &current.to_string(), ""),
+        ]);
+        let path = input(&mock, &json!({"active":false}));
+        let output = mock.run(&["webhook", "edit", "7", "--input", &path, "--json"]);
+        assert_eq!(decode(&output)["events"], json!(stored));
+        assert_private(&output);
+        let requests = mock.finish();
+        assert_eq!(requests.len(), 2);
+        let body: Value =
+            serde_json::from_str(requests[1].split("\r\n\r\n").nth(1).unwrap_or_default())
+                .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(body["events"], json!(expected));
+
+        // Apply the server's two flags to the actual PATCH, then compare the
+        // effective read response, rather than trusting our canned PATCH reply.
+        let mut after = Vec::new();
+        let sent = body["events"]
+            .as_array()
+            .unwrap_or_else(|| panic!("missing events"));
+        if sent.contains(&json!("pull_request_comment")) {
+            after.extend(["pull_request_comment", "pull_request_review_comment"]);
+        }
+        if sent.contains(&json!("pull_request_review")) {
+            after.extend([
+                "pull_request_review_approved",
+                "pull_request_review_rejected",
+            ]);
+        }
+        after.sort_unstable();
+        let mut before = stored;
+        before.sort_unstable();
+        assert_eq!(after, before);
+    }
+}
+
+#[test]
+fn edits_refuse_ambiguous_send_everything_before_patch() {
+    // This is EventsArray() for SendEverything=true, including flags that
+    // PATCH never updates. The API omits the underlying SendEverything bit.
+    let all = all_reported_events();
+    let mut current = hook();
+    current["events"] = json!(all);
+    let mut requested = all
+        .iter()
+        .filter(|e| {
+            !e.starts_with("pull_request_review_") || e.as_str() == "pull_request_review_request"
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    requested.push("pull_request_review".to_owned());
+    for body in [json!({"active":false}), json!({"events":requested})] {
+        for preview in [false, true] {
+            let mock = Mock::new(vec![response("200 OK", &current.to_string(), "")]);
+            let path = input(&mock, &body);
+            let mut args = vec!["webhook", "edit", "7", "--input", &path, "--json"];
+            if preview {
+                args.push("--dry-run");
+            }
+            let output = mock.run(&args);
+            assert_eq!(output.status.code(), Some(2));
+            assert!(output.stdout.is_empty());
+            assert_private(&output);
+            assert!(String::from_utf8_lossy(&output.stderr).contains("Send everything"));
+            assert_eq!(mock.finish().len(), 1, "must stop after GET, before PATCH");
+        }
+    }
+}
+
+#[test]
+fn edits_preserve_all_ci_and_package_events_on_unambiguous_hooks() {
+    let mut stored = all_reported_events();
+    stored.retain(|e| {
+        e == "push" || e == "package" || e.starts_with("workflow_") || e.starts_with("action_run_")
+    });
+    let mut current = hook();
+    current["events"] = json!(stored);
+    let mock = Mock::new(vec![
+        response("200 OK", &current.to_string(), ""),
+        response("200 OK", &current.to_string(), ""),
+    ]);
+    let path = input(&mock, &json!({"active":false}));
+    let output = mock.run(&["webhook", "edit", "7", "--input", &path, "--json"]);
+    assert_eq!(decode(&output)["events"], json!(stored));
+    assert_private(&output);
+    let requests = mock.finish();
+    assert_eq!(requests.len(), 2);
+    let body: Value =
+        serde_json::from_str(requests[1].split("\r\n\r\n").nth(1).unwrap_or_default())
+            .unwrap_or_else(|e| panic!("{e}"));
+    stored.sort();
+    assert_eq!(body["events"], json!(stored));
+    assert_eq!(body["active"], false);
+    assert_eq!(body["branch_filter"], "main");
+    assert_eq!(body["authorization_header"], "Bearer receiver-secret");
+}
+
+#[test]
+fn edits_refuse_review_events_that_cannot_round_trip() {
+    for stored in [
+        vec!["pull_request_review_approved"],
+        vec!["pull_request_review_comment"],
+        vec!["pull_request_comment"],
+    ] {
+        let mut current = hook();
+        current["events"] = json!(stored);
+        let mock = Mock::new(vec![response("200 OK", &current.to_string(), "")]);
+        let path = input(&mock, &json!({"active":false}));
+        let output = mock.run(&["webhook", "edit", "7", "--input", &path]);
+        assert_eq!(output.status.code(), Some(7));
+        assert!(output.stdout.is_empty());
+        assert_private(&output);
+        assert_eq!(mock.finish().len(), 1);
+    }
+}
+
+fn all_reported_events() -> Vec<String> {
+    let mut all = vec![
+        "create",
+        "delete",
+        "fork",
+        "push",
+        "issues",
+        "issue_assign",
+        "issue_label",
+        "issue_milestone",
+        "issue_comment",
+        "pull_request",
+        "pull_request_assign",
+        "pull_request_label",
+        "pull_request_milestone",
+        "pull_request_comment",
+        "pull_request_review_approved",
+        "pull_request_review_rejected",
+        "pull_request_review_comment",
+        "pull_request_sync",
+        "wiki",
+        "repository",
+        "release",
+        "package",
+        "pull_request_review_request",
+        "action_run_failure",
+        "action_run_success",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<Vec<_>>();
+    for prefix in ["workflow_run_", "workflow_job_"] {
+        for state in [
+            "blocked",
+            "cancelled",
+            "failure",
+            "running",
+            "skipped",
+            "success",
+            "waiting",
+        ] {
+            all.push(format!("{prefix}{state}"));
+        }
+    }
+    all
 }

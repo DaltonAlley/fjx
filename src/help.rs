@@ -1034,6 +1034,7 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
         }
         if command.name == "webhook edit" {
             text.push_str("Forgejo 17 resets omitted events, branch_filter and authorization_header. fjx reads and preserves them, even during dry runs; concurrent edits can race. Signing-secret rotation and workflow/action-run/package subscription changes require a replacement hook because the server ignores those edits.\n");
+            text.push_str("Hooks reporting every event require a replacement: the API hides Send everything mode, whose edits can lose CI/package subscriptions. Explicit all-event selections are indistinguishable and also refused, including dry runs.\n");
         }
         if command.name == "pr merge" {
             text.push_str("Safety: --match-head guards the expected head SHA; --auto requests server-side automatic merge.\n");

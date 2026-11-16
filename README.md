@@ -177,6 +177,10 @@ edit. fjx reads and preserves those fields, including during dry runs. This
 read-modify-write can race another editor. Signing-secret rotation and changes
 to workflow, action-run or package subscriptions require a replacement hook
 because Forgejo 17 ignores those edits; fjx rejects them before writing.
+Hooks reporting every event are also refused: the API hides whether they use
+**Send everything**, and editing that mode can lose CI and package subscriptions.
+An explicit selection of every event has the same response and is also refused.
+Create a replacement hook for either case.
 
 Keep real receiver URLs and credentials in protected files or feed them through
 stdin from a secret store. Webhook output omits URLs, credentials and provider

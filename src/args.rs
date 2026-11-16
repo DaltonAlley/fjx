@@ -28,6 +28,8 @@ pub(crate) enum Command {
     AuthSetupGit,
     AuthGitCredential { operation: GitCredentialOperation },
     RepoView,
+    Org(OrgArgs),
+    Team(TeamArgs),
     Issue(IssueArgs),
     Pull(PullArgs),
     Run(RunArgs),
@@ -70,6 +72,87 @@ impl WebhookArgs {
             Self::Edit { .. } => "edit",
             Self::Delete { .. } => "delete",
             Self::Test { .. } => "test",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum OrgArgs {
+    List {
+        user: Option<String>,
+        paging: PageArgs,
+    },
+    View {
+        org: String,
+    },
+    Create {
+        input: OsString,
+    },
+    Edit {
+        org: String,
+        input: OsString,
+    },
+    Delete {
+        org: String,
+    },
+    Members {
+        org: String,
+        paging: PageArgs,
+    },
+    Repos {
+        org: String,
+        paging: PageArgs,
+    },
+    RemoveMember {
+        org: String,
+        user: String,
+    },
+}
+
+impl OrgArgs {
+    pub(crate) const fn action(&self) -> &'static str {
+        match self {
+            Self::List { .. } => "list",
+            Self::View { .. } => "view",
+            Self::Create { .. } => "create",
+            Self::Edit { .. } => "edit",
+            Self::Delete { .. } => "delete",
+            Self::Members { .. } => "members",
+            Self::Repos { .. } => "repos",
+            Self::RemoveMember { .. } => "remove-member",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum TeamArgs {
+    List { org: String, paging: PageArgs },
+    View { id: u64 },
+    Create { org: String, input: OsString },
+    Edit { id: u64, input: OsString },
+    Delete { id: u64 },
+    Members { id: u64, paging: PageArgs },
+    Repos { id: u64, paging: PageArgs },
+    AddMember { id: u64, user: String },
+    RemoveMember { id: u64, user: String },
+    AddRepo { id: u64, repo: String },
+    RemoveRepo { id: u64, repo: String },
+}
+
+impl TeamArgs {
+    pub(crate) const fn action(&self) -> &'static str {
+        match self {
+            Self::List { .. } => "list",
+            Self::View { .. } => "view",
+            Self::Create { .. } => "create",
+            Self::Edit { .. } => "edit",
+            Self::Delete { .. } => "delete",
+            Self::Members { .. } => "members",
+            Self::Repos { .. } => "repos",
+            Self::AddMember { .. } => "add-member",
+            Self::RemoveMember { .. } => "remove-member",
+            Self::AddRepo { .. } => "add-repo",
+            Self::RemoveRepo { .. } => "remove-repo",
         }
     }
 }
@@ -737,6 +820,8 @@ fn parse_parser(mut parser: lexopt::Parser) -> Result<Args, Error> {
 )]
 fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
     match words {
+        [a, ..] if a == "org" => parse_org(&words[1..], o).map(Command::Org),
+        [a, ..] if a == "team" => parse_team(&words[1..], o).map(Command::Team),
         [a, b] if a == "webhook" && b == "list" => Ok(Command::Webhook(WebhookArgs::List {
             paging: o.take_paging()?,
         })),
@@ -953,6 +1038,141 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
                 "unknown or incomplete command; run {hint} --help"
             )))
         }
+    }
+}
+
+fn input_file(o: &mut Specific) -> Result<OsString, Error> {
+    o.input
+        .take()
+        .ok_or_else(|| Error::usage("create/edit requires --input PATH|-"))
+}
+
+fn account(value: &str) -> Result<String, Error> {
+    // Reject path metacharacters and dot segments before host/auth resolution.
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    {
+        return Err(Error::usage(
+            "organization/user must be a name containing letters, digits, -, _ or .",
+        ));
+    }
+    Ok(value.to_owned())
+}
+
+fn parse_org(words: &[String], o: &mut Specific) -> Result<OrgArgs, Error> {
+    match words {
+        [a] if a == "list" => Ok(OrgArgs::List {
+            user: None,
+            paging: o.take_paging()?,
+        }),
+        [a, user] if a == "list" => Ok(OrgArgs::List {
+            user: Some(account(user)?),
+            paging: o.take_paging()?,
+        }),
+        [a] if a == "create" => Ok(OrgArgs::Create {
+            input: input_file(o)?,
+        }),
+        [a, org] => {
+            let org = account(org)?;
+            match a.as_str() {
+                "view" => Ok(OrgArgs::View { org }),
+                "edit" => Ok(OrgArgs::Edit {
+                    org,
+                    input: input_file(o)?,
+                }),
+                "delete" => Ok(OrgArgs::Delete { org }),
+                "members" => Ok(OrgArgs::Members {
+                    org,
+                    paging: o.take_paging()?,
+                }),
+                "repos" => Ok(OrgArgs::Repos {
+                    org,
+                    paging: o.take_paging()?,
+                }),
+                _ => Err(Error::usage(
+                    "unknown organization command; run fjx org --help",
+                )),
+            }
+        }
+        [a, org, user] if a == "remove-member" => Ok(OrgArgs::RemoveMember {
+            org: account(org)?,
+            user: account(user)?,
+        }),
+        _ => Err(Error::usage(
+            "unknown or incomplete organization command; run fjx org --help",
+        )),
+    }
+}
+
+fn parse_team(words: &[String], o: &mut Specific) -> Result<TeamArgs, Error> {
+    match words {
+        [a, org] if a == "list" => Ok(TeamArgs::List {
+            org: account(org)?,
+            paging: o.take_paging()?,
+        }),
+        [a, org] if a == "create" => Ok(TeamArgs::Create {
+            org: account(org)?,
+            input: input_file(o)?,
+        }),
+        [a, id] => {
+            let id = positive(id, "team ID")?;
+            match a.as_str() {
+                "view" => Ok(TeamArgs::View { id }),
+                "edit" => Ok(TeamArgs::Edit {
+                    id,
+                    input: input_file(o)?,
+                }),
+                "delete" => Ok(TeamArgs::Delete { id }),
+                "members" => Ok(TeamArgs::Members {
+                    id,
+                    paging: o.take_paging()?,
+                }),
+                "repos" => Ok(TeamArgs::Repos {
+                    id,
+                    paging: o.take_paging()?,
+                }),
+                _ => Err(Error::usage("unknown team command; run fjx team --help")),
+            }
+        }
+        [a, id, value] => {
+            let id = positive(id, "team ID")?;
+            match a.as_str() {
+                "add-member" => Ok(TeamArgs::AddMember {
+                    id,
+                    user: account(value)?,
+                }),
+                "remove-member" => Ok(TeamArgs::RemoveMember {
+                    id,
+                    user: account(value)?,
+                }),
+                "add-repo" | "remove-repo" => {
+                    let (owner, name) = value
+                        .split_once('/')
+                        .ok_or_else(|| Error::usage("repository must be OWNER/REPO"))?;
+                    account(owner)?;
+                    account(name)?;
+                    Ok(if a == "add-repo" {
+                        TeamArgs::AddRepo {
+                            id,
+                            repo: value.clone(),
+                        }
+                    } else {
+                        TeamArgs::RemoveRepo {
+                            id,
+                            repo: value.clone(),
+                        }
+                    })
+                }
+                _ => Err(Error::usage("unknown team command; run fjx team --help")),
+            }
+        }
+        _ => Err(Error::usage(
+            "unknown or incomplete team command; run fjx team --help",
+        )),
     }
 }
 
@@ -1348,6 +1568,29 @@ fn subcommands(group: &str) -> &'static [&'static str] {
     match group {
         "auth" => &["login", "status", "logout", "setup-git", "git-credential"],
         "repo" => &["view"],
+        "org" => &[
+            "list",
+            "view",
+            "create",
+            "edit",
+            "delete",
+            "members",
+            "repos",
+            "remove-member",
+        ],
+        "team" => &[
+            "list",
+            "view",
+            "create",
+            "edit",
+            "delete",
+            "members",
+            "repos",
+            "add-member",
+            "remove-member",
+            "add-repo",
+            "remove-repo",
+        ],
         "issue" => &[
             "list", "view", "create", "comment", "comments", "edit", "close", "reopen",
         ],
@@ -1409,6 +1652,18 @@ fn command_help_path(words: &[String]) -> Result<Vec<String>, Error> {
     };
     let path = validate_path(&words[..length])?;
     let maximum = match path.as_slice() {
+        [group, action] if matches!(group.as_str(), "org" | "team") => {
+            if matches!(
+                action.as_str(),
+                "add-member" | "remove-member" | "add-repo" | "remove-repo"
+            ) {
+                4
+            } else if group == "org" && action == "create" {
+                2
+            } else {
+                3
+            }
+        }
         [group, command] if group == "pr" && command == "review-comments" => 4,
         [group, command] if group == "release" && command == "upload" => 4,
         [_, command]
@@ -1440,6 +1695,16 @@ fn consume_help_flags(path: &[String], o: &mut Specific) -> Result<(), Error> {
     }
     if group == "webhook" && command == "test" {
         o.reference.take();
+    }
+    if matches!(group, "org" | "team") {
+        if matches!(command, "create" | "edit") {
+            o.input.take();
+        }
+        if matches!(command, "list" | "members" | "repos") {
+            o.page.take();
+            o.limit.take();
+            o.all = false;
+        }
     }
     if group == "api" {
         o.method.take();

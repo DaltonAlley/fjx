@@ -56,6 +56,8 @@ fn run(args: &Args) -> Result<Outcome, Error> {
         Command::AuthGitCredential { operation } => {
             commands::auth::git_credential(args, *operation)
         }
+        Command::Org(command) => commands::org::run(args, command),
+        Command::Team(command) => commands::org::run_team(args, command),
         Command::RepoView => commands::repo::view(args),
         Command::Issue(command) => commands::issue::run(args, command),
         Command::Pull(command) => commands::pull::run(args, command),

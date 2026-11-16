@@ -23,12 +23,21 @@ use crate::error::Error;
 use crate::host::Host;
 
 #[derive(Clone)]
-pub(crate) struct Token(String);
+pub(crate) struct Token(String, bool);
 
 impl Token {
     pub(crate) fn parse(value: String) -> Result<Self, Error> {
         Self::validate(&value)?;
-        Ok(Self(value))
+        Ok(Self(value, false))
+    }
+
+    pub(crate) fn oauth(value: String) -> Result<Self, Error> {
+        Self::validate(&value)?;
+        Ok(Self(value, true))
+    }
+
+    pub(crate) const fn scheme(&self) -> &'static str {
+        if self.1 { "Bearer" } else { "token" }
     }
 
     fn validate(value: &str) -> Result<(), Error> {
@@ -68,9 +77,19 @@ struct HostEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     user: Option<String>,
     token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    oauth: Option<OAuthCredentials>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct OAuthCredentials {
+    pub(crate) client_id: String,
+    pub(crate) refresh_token: String,
+    pub(crate) expires_at: u64,
 }
 
 pub(crate) struct GitCredential {
+    pub(crate) host: Host,
     pub(crate) user: String,
     pub(crate) token: Token,
 }
@@ -156,6 +175,11 @@ impl Config {
             }
             Token::validate(&entry.token)
                 .map_err(|_| Error::context("invalid token in token file"))?;
+            if let Some(oauth) = &entry.oauth {
+                Token::validate(&oauth.refresh_token)
+                    .map_err(|_| Error::context("invalid OAuth credentials in token file"))?;
+                validate_client_id(&oauth.client_id)?;
+            }
             if entry.user.as_deref().is_some_and(|user| !valid_user(user)) {
                 return Err(Error::context("invalid user in token file"));
             }
@@ -174,7 +198,28 @@ impl Config {
     pub(crate) fn token(&self, host: &Host) -> Option<Token> {
         self.hosts
             .get(host.as_str())
-            .map(|entry| Token(entry.token.clone()))
+            .map(|entry| Token(entry.token.clone(), entry.oauth.is_some()))
+    }
+
+    pub(crate) fn oauth(&self, host: &Host) -> Option<&OAuthCredentials> {
+        self.hosts
+            .get(host.as_str())
+            .and_then(|entry| entry.oauth.as_ref())
+    }
+
+    pub(crate) fn save_oauth(
+        &mut self,
+        host: &Host,
+        token: Token,
+        oauth: OAuthCredentials,
+    ) -> Result<(), Error> {
+        let entry = self
+            .hosts
+            .get_mut(host.as_str())
+            .ok_or_else(|| Error::context("no saved login is available for this host"))?;
+        entry.token = token.into_string();
+        entry.oauth = Some(oauth);
+        Ok(())
     }
 
     pub(crate) fn has_git_login(&self, host: &Host) -> bool {
@@ -211,6 +256,7 @@ impl Config {
             HostEntry {
                 user: Some(user),
                 token: token.into_string(),
+                oauth: None,
             },
         );
         self.default_host = Some(host.as_str().to_owned());
@@ -233,8 +279,9 @@ impl Config {
                 Some((
                     value.len(),
                     GitCredential {
+                        host,
                         user: entry.user.clone()?,
-                        token: Token(entry.token.clone()),
+                        token: Token(entry.token.clone(), entry.oauth.is_some()),
                     },
                 ))
             })
@@ -460,6 +507,87 @@ pub(crate) fn persistence_unavailable() -> Error {
 
 fn valid_user(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_control)
+}
+
+pub(crate) fn validate_client_id(value: &str) -> Result<(), Error> {
+    if value.is_empty()
+        || value.len() > 256
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(Error::context(
+            "OAuth client ID must contain only letters, digits, '.', '_' or '-' (up to 256 bytes)",
+        ));
+    }
+    Ok(())
+}
+
+/// A stable sidecar lock survives atomic replacement of the credential file.
+/// It contains no credentials; dropping the handle releases the OS lock, even
+/// when a process fails during token exchange. Never unlink a live lock file.
+pub(crate) fn auth_lock(path: &Path) -> Result<fs::File, Error> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::local("token file path has no parent directory"))?;
+    #[cfg(unix)]
+    let parent = prepare_directory(parent)?;
+    #[cfg(not(unix))]
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        fs::create_dir_all(parent).map_err(|_| Error::local("could not create token directory"))?;
+        parent
+    };
+    let lock_path = parent.join(".fjx-auth.lock");
+    #[cfg(windows)]
+    match windows::create_private(&lock_path) {
+        Ok(file) => drop(file),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(_) => return Err(Error::local("could not create private authentication lock")),
+    }
+    if let Ok(metadata) = fs::symlink_metadata(&lock_path)
+        && (!metadata.is_file() || metadata.file_type().is_symlink())
+    {
+        return Err(Error::local("authentication lock must be a regular file"));
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(3).custom_flags(0x0020_0000);
+    }
+    #[cfg(unix)]
+    let file = match options.create_new(true).mode(0o600).open(&lock_path) {
+        Ok(file) => {
+            // A restrictive umask can remove owner access even from mode 0600.
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|_| Error::local("could not secure authentication lock"))?;
+            file
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => options
+            .create_new(false)
+            .open(&lock_path)
+            .map_err(|_| Error::local("could not open authentication lock"))?,
+        Err(_) => return Err(Error::local("could not create authentication lock")),
+    };
+    #[cfg(not(unix))]
+    let file = options
+        .open(lock_path)
+        .map_err(|_| Error::local("could not open authentication lock"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| Error::local("could not inspect authentication lock"))?;
+    if !metadata.is_file() {
+        return Err(Error::local("authentication lock must be a regular file"));
+    }
+    validate_token_file_security(&metadata)?;
+    #[cfg(windows)]
+    validate_open_token_file(&file)?;
+    file.lock()
+        .map_err(|_| Error::local("could not lock saved authentication"))?;
+    Ok(file)
 }
 
 #[cfg(unix)]

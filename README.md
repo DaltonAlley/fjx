@@ -66,8 +66,9 @@ The crate is not published to crates.io. To build without installing, run
 
 ## Quickstart
 
-Create a token on your Forgejo server with permissions for your commands,
-then enter it at the hidden prompt:
+Sign in through your browser. By default, fjx uses the public
+**git-credential-oauth** application pre-registered by Forgejo and Gitea, so no
+application registration or client ID is needed on a standard installation:
 
 ```sh
 fjx auth login --host https://forgejo.example
@@ -82,7 +83,31 @@ The last command previews a request. Remove `--dry-run` only when you intend to
 create the issue. Optionally run `fjx auth setup-git --host https://forgejo.example`
 to share the saved login with Git and `jj git push`.
 
-For automation, supply `FJX_TOKEN` or `FORGEJO_TOKEN` through your environment's
+Login opens the default browser and also prints an authorization link. Approve
+access in the browser; fjx saves your login and refreshes expiring tokens
+automatically. The browser's consent page calls the shared application
+**git-credential-oauth**; its authorization is also shared with Git credential
+helpers using that client ID. Subsequent interactive logins reuse the saved
+client ID. OAuth tokens currently have access to all actions your
+account can perform; Forgejo does not yet implement OAuth permission scopes.
+
+Client IDs resolve in this order: `--client-id`, `FJX_CLIENT_ID`, the host's saved
+OAuth client ID, then `a4792ccc-144e-407e-86c9-5e7d8d9c3269`
+(`git-credential-oauth`). Existing saved custom registrations continue to work.
+If the server disables the built-in application, register a public OAuth2
+application under **Settings → Applications** with redirect URI
+`http://127.0.0.1/`, then pass its ID with `--client-id ID`. A custom application
+also keeps its consent and authorization separate from the shared Git helper.
+
+Use `--no-browser` to print the link without opening it, or `--web` to request
+browser login when stdin is not a terminal. The browser must reach the CLI's
+local callback: over SSH, forward the callback port printed by fjx, or use a
+personal access token instead. This is a browser callback flow, not device-code
+authorization. Login times out after five minutes.
+
+For a personal access token, create one on the forge with permissions for your
+commands and run `fjx auth login --with-token --host https://forgejo.example`.
+Interactive token input is hidden. For automation, supply `FJX_TOKEN` or `FORGEJO_TOKEN` through your environment's
 secret mechanism. `auth login --with-token` reads one trimmed line from stdin,
 but avoid typing tokens into `echo` commands, shell history, or command arguments.
 
@@ -134,7 +159,18 @@ fjx api /repos/owner/repo/issues --paginate --json
 
 Common flags may go before or after command words: `--host URL`, `-R OWNER/REPO`, `--json`, `--dry-run`, and `--yes`. `FJX_HOST`, `FJX_REPO`, `FJX_TOKEN`, and `FORGEJO_TOKEN` provide non-interactive context. `FJX_CONFIG` selects the token store.
 
-`auth login` takes a token from a hidden prompt. Pass `--with-token` to read one trimmed line from stdin. `auth setup-git` installs a host-scoped Git credential helper so Git and `jj git push` can use the same saved login. Unix token files use mode 0600.
+`auth login` uses browser OAuth in a terminal, defaulting to the pre-registered
+`git-credential-oauth` application for new logins. Pass `--client-id ID` or set
+`FJX_CLIENT_ID` to override it; the ID is remembered with a successful OAuth login.
+`--no-browser` prints the authorization link without launching a browser, and
+`--web` explicitly selects OAuth without a terminal. `FJX_BROWSER` can name one
+browser executable; it is invoked directly with the URL, without a shell.
+`--with-token` uses a hidden prompt in a terminal or reads one trimmed line from
+stdin. Piped input without browser flags retains the existing token behavior.
+`auth setup-git` installs a host-scoped Git credential helper so Git and
+`jj git push` can use the same saved login, including OAuth refresh. Unix token
+files use mode 0600. `auth logout` removes local credentials; it does not revoke
+the authorization on the forge.
 
 On Windows, saved tokens default to `%APPDATA%\fjx\hosts.json`, with a `%USERPROFILE%\AppData\Roaming` fallback. Files are created with a protected DACL granting access only to the current user. Before reading, fjx checks the open file's owner and DACL; only the current user, SYSTEM, and built-in Administrators may have access. Filesystems that cannot enforce or report these permissions fail closed. The file remains plaintext on disk, protected by Windows access controls. This works in SSH sessions without Credential Manager. Environment tokens still work without `HOME`, `APPDATA`, or `USERPROFILE` when `--host` or `FJX_HOST` supplies the host.
 

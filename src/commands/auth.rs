@@ -6,7 +6,7 @@ use std::process::{Command as ProcessCommand, Output};
 
 use serde::{Deserialize, Serialize};
 
-use crate::args::{Args, GitCredentialOperation};
+use crate::args::{Args, GitCredentialOperation, LoginArgs};
 use crate::config::{self, Config, Token};
 use crate::context::Context;
 use crate::error::Error;
@@ -35,15 +35,55 @@ struct ResultRecord {
     html_url: Option<String>,
 }
 
-pub(crate) fn login(args: &Args, with_token: bool) -> Result<Outcome, Error> {
+pub(crate) fn login(args: &Args, options: &LoginArgs) -> Result<Outcome, Error> {
     require_persistence()?;
     reject_auth_flags(args)?;
     let mut context = Context::resolve(args, false, false)?;
-    let token = read_token(with_token, args.json)?;
+    let web = !options.with_token
+        && (options.web
+            || options.no_browser
+            || options.client_id.is_some()
+            || io::stdin().is_terminal());
+    let (token, oauth) = if web {
+        let environment_id = if options.client_id.is_none() {
+            std::env::var_os("FJX_CLIENT_ID")
+                .map(|value| {
+                    value
+                        .into_string()
+                        .map_err(|_| Error::context("FJX_CLIENT_ID must be valid UTF-8"))
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let client_id = options
+            .client_id
+            .clone()
+            .or(environment_id)
+            .or_else(|| {
+                context
+                    .config
+                    .oauth(&context.host)
+                    .map(|saved| saved.client_id.clone())
+            })
+            .unwrap_or_else(|| crate::oauth::DEFAULT_CLIENT_ID.to_owned());
+        let (token, saved) = crate::oauth::login(&context.host, &client_id, options.no_browser)?;
+        (token, Some(saved))
+    } else {
+        (read_token(args.json)?, None)
+    };
     let client = Client::new(context.host.clone(), token.clone());
     let user = authenticated_user(&client)?;
-    context.config.login(&context.host, user.login, token)?;
-    context.config.save(config_path(&context)?)?;
+    let path = config_path(&context)?.to_path_buf();
+    let _lock = config::auth_lock(&path)?;
+    context.config = Config::load(&path)?;
+    context
+        .config
+        .login(&context.host, user.login, token.clone())?;
+    if let Some(oauth) = oauth {
+        context.config.save_oauth(&context.host, token, oauth)?;
+    }
+    context.config.save(&path)?;
     result(args.json, "auth.login")
 }
 
@@ -57,6 +97,9 @@ pub(crate) fn setup_git(args: &Args) -> Result<Outcome, Error> {
         })?;
         let client = Client::new(context.host.clone(), token);
         let user = authenticated_user(&client)?;
+        let path = config_path(&context)?.to_path_buf();
+        let _lock = config::auth_lock(&path)?;
+        context.config = Config::load(&path)?;
         context.config.save_user(&context.host, user.login)?;
         context.config.save(config_path(&context)?)?;
     }
@@ -92,16 +135,23 @@ pub(crate) fn git_credential(
     let Some(host) = request.host else {
         return Ok(Outcome::text(""));
     };
-    let config = Config::load(&config::path()?)?;
+    let config_path = config::path()?;
+    let mut config = Config::load(&config_path)?;
     let Some(credential) =
         config.git_credential(&protocol, &host, request.path.as_deref().unwrap_or(""))
     else {
         return Ok(Outcome::text(""));
     };
+    let token = if config.oauth(&credential.host).is_some() {
+        crate::context::saved_token(&mut config, &credential.host, Some(&config_path))?
+            .ok_or_else(|| Error::context("saved OAuth token is missing"))?
+    } else {
+        credential.token
+    };
     Ok(Outcome::text(format!(
         "username={}\npassword={}\n",
         credential.user,
-        credential.token.as_str()
+        token.as_str()
     )))
 }
 
@@ -392,6 +442,9 @@ pub(crate) fn logout(args: &Args) -> Result<Outcome, Error> {
     require_persistence()?;
     reject_auth_flags(args)?;
     let mut context = Context::resolve(args, false, false)?;
+    let path = config_path(&context)?.to_path_buf();
+    let _lock = config::auth_lock(&path)?;
+    context.config = Config::load(&path)?;
     context.config.logout(&context.host);
     context.config.save(config_path(&context)?)?;
     result(args.json, "auth.logout")
@@ -418,19 +471,19 @@ fn authenticated_user(client: &Client) -> Result<UserResponse, Error> {
         .map_err(|error| Error::data(format!("Forgejo returned an invalid user: {error}")))
 }
 
-fn read_token(with_token: bool, json: bool) -> Result<Token, Error> {
-    let value = if with_token || !io::stdin().is_terminal() {
+fn read_token(json: bool) -> Result<Token, Error> {
+    let value = if io::stdin().is_terminal() {
+        let prompt = if json { "" } else { "Token: " };
+        rpassword::prompt_password(prompt)
+            .map(|value| value.trim().to_owned())
+            .map_err(|error| Error::local(format!("could not read hidden token: {error}")))?
+    } else {
         let mut line = String::new();
         io::stdin()
             .lock()
             .read_line(&mut line)
             .map_err(|error| Error::local(format!("could not read token: {error}")))?;
         line.trim().to_owned()
-    } else {
-        let prompt = if json { "" } else { "Token: " };
-        rpassword::prompt_password(prompt)
-            .map(|value| value.trim().to_owned())
-            .map_err(|error| Error::local(format!("could not read hidden token: {error}")))?
     };
     Token::parse(value)
 }

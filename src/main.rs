@@ -6,6 +6,7 @@ mod error;
 mod help;
 mod host;
 mod http;
+mod oauth;
 mod output;
 mod repo;
 
@@ -48,7 +49,7 @@ fn execute(args: &Args) -> Result<Outcome, Error> {
 
 fn run(args: &Args) -> Result<Outcome, Error> {
     match &args.command {
-        Command::AuthLogin { with_token } => commands::auth::login(args, *with_token),
+        Command::AuthLogin { options } => commands::auth::login(args, options),
         Command::AuthStatus => commands::auth::status(args),
         Command::AuthLogout => commands::auth::logout(args),
         Command::AuthSetupGit => commands::auth::setup_git(args),

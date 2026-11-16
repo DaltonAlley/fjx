@@ -12,7 +12,14 @@ fn shell_quote(word: &str) -> String {
 
 fn login_in_terminal(json: bool) -> Output {
     let executable = env!("CARGO_BIN_EXE_fjx");
-    let mut arguments = vec![executable, "auth", "login", "--host", "http://127.0.0.1:0"];
+    let mut arguments = vec![
+        executable,
+        "auth",
+        "login",
+        "--with-token",
+        "--host",
+        "http://127.0.0.1:0",
+    ];
     if json {
         arguments.push("--json");
     }

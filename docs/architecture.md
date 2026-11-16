@@ -16,6 +16,7 @@ boundary prevents partial success output when a request or later page fails.
 | `context` | Resolve explicit flags, environment, remotes, saved host, and token source. |
 | `config` | Token validation, private-file checks, persistence, and credential lookup. Windows system calls are isolated in `config/windows.rs`; descriptor rules in `config/acl.rs` are tested on every platform. |
 | `http` | Synchronous authenticated requests, redirect refusal, bounded response reads, and HTTP errors. |
+| `oauth` | Public-client browser authorization, PKCE S256, bounded loopback callbacks, token refresh, and platform browser/RNG integration. |
 | `commands` | Typed Forgejo operations, raw API path rules, pagination, and command outcomes. |
 | `output` | Stable plain-field encoding, safe multiline human text, compact JSON, and field projection. |
 | `error` | Error categories and exit codes. |
@@ -48,6 +49,36 @@ are also accepted when reading existing files. This uses file access controls,
 including in SSH network logons, without Credential Manager. Authentication
 output must never disclose tokens.
 
+Interactive `auth login` uses OAuth authorization code flow with PKCE S256 and
+a random state value. Client IDs resolve from `--client-id`, `FJX_CLIENT_ID`,
+the host's saved OAuth registration, then the public `git-credential-oauth`
+client (`a4792ccc-144e-407e-86c9-5e7d8d9c3269`) pre-registered by both forges.
+No instance-specific defaults are embedded. The consent page identifies the
+shared application as `git-credential-oauth`; its server-side grants are shared
+with other clients using that registration. Administrators may disable it;
+custom public registrations with redirect URI `http://127.0.0.1/` remain
+supported. No client secret is used. An
+ephemeral listener binds only IPv4 loopback, checks the callback Host, path,
+state, and duplicate parameters, bounds headers and read time, and closes after
+authorization or a five-minute timeout. Progress and the manual authorization
+link go to stderr, leaving stdout for the final result. The selected host's
+base path is retained for both authorization and token exchange.
+
+OAuth credentials extend the existing host record with client ID, refresh token,
+and absolute access-token expiry. Existing PAT records remain compatible. OAuth
+requests use Bearer authorization; PAT requests retain token authorization.
+Expiring saved OAuth tokens refresh before API execution (and Git credential
+delivery), persisting rotated credentials before use. Neither a failed refresh
+nor a failed API write is replayed. Environment tokens retain precedence and
+bypass saved-token refresh. A stable sidecar file serializes credential updates
+and refresh across CLI/Git processes; refresh reloads credentials after locking
+so a rotated refresh token is not reused. OAuth endpoint errors omit server bodies to prevent
+code/token disclosure. Local logout does not revoke server authorization.
+
+The dependency allowlist remains unchanged. Randomness comes from `/dev/urandom`
+on Unix and Windows BCryptGenRandom. The small safe SHA-256/base64url implementation
+is checked against FIPS digest vectors and the RFC 7636 S256 example.
+
 ## Safety and output invariants
 
 - Hosts accept HTTPS or loopback HTTP. The HTTP client follows no redirects.
@@ -56,8 +87,9 @@ output must never disclose tokens.
 - Pagination and run watching accumulate a final result before returning output.
 - Plain fields have reversible control-character escaping. JSON retains original
   values. See [README output contracts](../README.md#output-contracts).
-- Unsafe Rust is denied except in `config/windows.rs`, whose documented Windows
-  API calls use owned handles and aligned buffers. There is no public library API.
+- Unsafe Rust is denied except in `config/windows.rs` and `oauth/windows.rs`.
+  Their documented Windows API calls use owned handles, aligned buffers, or a
+  fixed-size writable RNG buffer. There is no public library API.
   Runtime dependencies stay limited to those declared in [Cargo.toml](../Cargo.toml).
 
 ## Verification

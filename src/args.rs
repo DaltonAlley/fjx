@@ -22,7 +22,7 @@ pub(crate) struct Args {
 
 #[derive(Debug)]
 pub(crate) enum Command {
-    AuthLogin { with_token: bool },
+    AuthLogin { options: LoginArgs },
     AuthStatus,
     AuthLogout,
     AuthSetupGit,
@@ -40,6 +40,14 @@ pub(crate) enum Command {
     Help { path: Vec<String> },
     Schema { path: Vec<String> },
     Version,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct LoginArgs {
+    pub(crate) with_token: bool,
+    pub(crate) web: bool,
+    pub(crate) no_browser: bool,
+    pub(crate) client_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -364,6 +372,9 @@ pub(crate) struct EditArgs {
 )]
 struct Specific {
     with_token: bool,
+    web: bool,
+    no_browser: bool,
+    client_id: Option<String>,
     method: Option<String>,
     input: Option<OsString>,
     paginate: bool,
@@ -447,6 +458,13 @@ fn parse_parser(mut parser: lexopt::Parser) -> Result<Args, Error> {
             Long("dry-run") => set_switch(&mut dry_run, "--dry-run")?,
             Long("yes") => set_switch(&mut yes, "--yes")?,
             Long("with-token") => set_switch(&mut specific.with_token, "--with-token")?,
+            Long("web") => set_switch(&mut specific.web, "--web")?,
+            Long("no-browser") => set_switch(&mut specific.no_browser, "--no-browser")?,
+            Long("client-id") => set_once(
+                &mut specific.client_id,
+                string_value(&mut parser, "--client-id")?,
+                "--client-id",
+            )?,
             Short('X') => set_once(&mut specific.method, string_value(&mut parser, "-X")?, "-X")?,
             Long("input") => set_once(&mut specific.input, os_value(&mut parser)?, "--input")?,
             Long("paginate") => set_switch(&mut specific.paginate, "--paginate")?,
@@ -734,7 +752,7 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
             }))
         }
         [a, b] if a == "auth" && b == "login" => Ok(Command::AuthLogin {
-            with_token: o.take_with_token(),
+            options: o.take_login()?,
         }),
         [a, b] if a == "auth" && b == "status" => Ok(Command::AuthStatus),
         [a, b] if a == "auth" && b == "logout" => Ok(Command::AuthLogout),
@@ -970,8 +988,18 @@ impl Specific {
         Ok(edit)
     }
 
-    fn take_with_token(&mut self) -> bool {
-        std::mem::take(&mut self.with_token)
+    fn take_login(&mut self) -> Result<LoginArgs, Error> {
+        if self.with_token && (self.web || self.no_browser || self.client_id.is_some()) {
+            return Err(Error::usage(
+                "--with-token cannot be combined with browser login flags",
+            ));
+        }
+        Ok(LoginArgs {
+            with_token: std::mem::take(&mut self.with_token),
+            web: std::mem::take(&mut self.web),
+            no_browser: std::mem::take(&mut self.no_browser),
+            client_id: take_optional_nonempty(&mut self.client_id, "--client-id")?,
+        })
     }
 
     fn take_state(&mut self) -> Result<ListState, Error> {
@@ -1212,6 +1240,9 @@ impl Specific {
             (self.match_head.is_some(), "--match-head"),
             (self.auto, "--auto"),
             (self.with_token, "--with-token"),
+            (self.web, "--web"),
+            (self.no_browser, "--no-browser"),
+            (self.client_id.is_some(), "--client-id"),
             (self.method.is_some(), "-X"),
             (self.input.is_some(), "--input"),
             (self.paginate, "--paginate"),
@@ -1354,6 +1385,9 @@ fn consume_help_flags(path: &[String], o: &mut Specific) -> Result<(), Error> {
     }
     if group == "auth" && command == "login" {
         o.with_token = false;
+        o.web = false;
+        o.no_browser = false;
+        o.client_id.take();
     }
     if command == "list"
         || (matches!(group, "issue" | "pr")

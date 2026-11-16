@@ -331,6 +331,19 @@ impl CommandMeta {
                 .push("cannot add and remove the same label, label ID, or assignee");
         }
         match self.name {
+            "auth login" => {
+                arguments
+                    .mutually_exclusive
+                    .push(&["--with-token", "--web"]);
+                arguments
+                    .mutually_exclusive
+                    .push(&["--with-token", "--no-browser"]);
+                arguments
+                    .mutually_exclusive
+                    .push(&["--with-token", "--client-id"]);
+                arguments.constraints.push("interactive login uses browser OAuth; piped input reads a token unless --web, --no-browser or --client-id selects OAuth");
+                arguments.constraints.push("OAuth client ID order: --client-id, FJX_CLIENT_ID, saved host registration, then the built-in git-credential-oauth public client; a custom public client needs redirect URI http://127.0.0.1/");
+            }
             "issue comment" | "pr comment" => {
                 arguments.required_one_of.push(&["--body", "--body-file"]);
             }
@@ -366,8 +379,13 @@ macro_rules! command {
 static COMMANDS: &[CommandMeta] = &[
     command!(
         "auth login",
-        "fjx auth login [--with-token]",
-        ["--with-token (read token from stdin)"],
+        "fjx auth login [--web | --with-token] [--client-id ID] [--no-browser]",
+        [
+            "--web (browser OAuth, including without a terminal)",
+            "--with-token (hidden prompt or stdin)",
+            "--client-id ID (override public OAuth application; also FJX_CLIENT_ID)",
+            "--no-browser (print the OAuth link without opening it)"
+        ],
         "fjx auth login --host https://forge.example",
         RESULT,
         true,

@@ -36,12 +36,12 @@ impl Context {
     pub(crate) fn resolve(args: &Args, need_repo: bool, need_token: bool) -> Result<Self, Error> {
         let config_path = config::path_for_context()?;
         #[cfg(any(unix, windows))]
-        let config = match config_path.as_deref() {
+        let mut config = match config_path.as_deref() {
             Some(path) => Config::load(path)?,
             None => Config::empty(),
         };
         #[cfg(not(any(unix, windows)))]
-        let config = Config::empty();
+        let mut config = Config::empty();
         let explicit_repo = args
             .repo
             .as_deref()
@@ -98,7 +98,11 @@ impl Context {
             (Some(token), Some(TokenSource::Fjx))
         } else if let Some(token) = token_from_env("FORGEJO_TOKEN")? {
             (Some(token), Some(TokenSource::Forgejo))
-        } else if let Some(value) = config.token(&host) {
+        } else if let Some(value) = if need_token {
+            saved_token(&mut config, &host, config_path.as_deref())?
+        } else {
+            config.token(&host)
+        } {
             (Some(value), Some(TokenSource::Config))
         } else {
             (None, None)
@@ -118,6 +122,32 @@ impl Context {
             config_path,
         })
     }
+}
+
+/// Refresh before the command runs, never by replaying a failed API operation.
+pub(crate) fn saved_token(
+    config: &mut Config,
+    host: &Host,
+    path: Option<&std::path::Path>,
+) -> Result<Option<Token>, Error> {
+    if let Some(saved) = config.oauth(host)
+        && saved.expires_at <= crate::oauth::now()?.saturating_add(30)
+    {
+        let path = path.ok_or_else(|| Error::context("saved token path is unavailable"))?;
+        let _lock = config::auth_lock(path)?;
+        // Another CLI or Git invocation may already have rotated this token.
+        *config = Config::load(path)?;
+        let Some(saved) = config.oauth(host) else {
+            return Ok(config.token(host));
+        };
+        if saved.expires_at > crate::oauth::now()?.saturating_add(30) {
+            return Ok(config.token(host));
+        }
+        let (token, oauth) = crate::oauth::refresh(host, saved)?;
+        config.save_oauth(host, token, oauth)?;
+        config.save(path)?;
+    }
+    Ok(config.token(host))
 }
 
 fn env_nonempty(name: &str) -> Option<String> {

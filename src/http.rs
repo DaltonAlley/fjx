@@ -10,6 +10,61 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ERROR_BODY_BYTES: u64 = 64 * 1024;
 const MAX_ERROR_MESSAGE_CHARS: usize = 300;
 
+#[derive(serde::Deserialize)]
+pub(crate) struct OAuthGrant {
+    pub(crate) access_token: String,
+    pub(crate) refresh_token: Option<String>,
+    pub(crate) expires_in: u64,
+    token_type: String,
+}
+
+/// OAuth errors deliberately omit server bodies: they can echo codes or tokens.
+pub(crate) fn oauth_token(host: &Host, body: &serde_json::Value) -> Result<OAuthGrant, Error> {
+    let bytes =
+        serde_json::to_vec(body).map_err(|_| Error::local("could not encode OAuth request"))?;
+    let agent = ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout(Duration::from_mins(1))
+        .build();
+    let result = agent
+        .post(&host.web_url("login/oauth/access_token"))
+        .set("Content-Type", "application/json")
+        .set("Accept", "application/json")
+        .set("User-Agent", concat!("fjx/", env!("CARGO_PKG_VERSION")))
+        .send_bytes(&bytes);
+    let response = match result {
+        Ok(response) if (200..300).contains(&response.status()) => response,
+        Ok(response) | Err(ureq::Error::Status(_, response)) => {
+            return Err(Error::api(format!(
+                "OAuth token request returned HTTP {}; run fjx auth login --web to sign in again",
+                response.status()
+            )));
+        }
+        Err(ureq::Error::Transport(_)) => {
+            return Err(Error::network(
+                "OAuth token request failed; it was not retried",
+            ));
+        }
+    };
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_ERROR_BODY_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Error::network("could not read OAuth token response"))?;
+    if bytes.len() as u64 > MAX_ERROR_BODY_BYTES {
+        return Err(Error::data("OAuth token response exceeds 64 KiB"));
+    }
+    let grant: OAuthGrant =
+        serde_json::from_slice(&bytes).map_err(|_| Error::data("invalid OAuth token response"))?;
+    if !grant.token_type.eq_ignore_ascii_case("bearer") || grant.expires_in == 0 {
+        return Err(Error::data(
+            "OAuth response requires a Bearer token and positive expires_in",
+        ));
+    }
+    Ok(grant)
+}
+
 pub(crate) struct Client {
     agent: ureq::Agent,
     host: Host,
@@ -75,7 +130,10 @@ impl Client {
     fn request(&self, method: &str, url: &str) -> ureq::Request {
         self.agent
             .request(method, url)
-            .set("Authorization", &format!("token {}", self.token.as_str()))
+            .set(
+                "Authorization",
+                &format!("{} {}", self.token.scheme(), self.token.as_str()),
+            )
             .set("Accept", "application/json")
             .set("User-Agent", concat!("fjx/", env!("CARGO_PKG_VERSION")))
     }

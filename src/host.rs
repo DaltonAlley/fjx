@@ -57,6 +57,10 @@ impl Host {
         format!("{}/api/v1/{}", self.base, relative.trim_start_matches('/'))
     }
 
+    pub(crate) fn web_url(&self, relative: &str) -> String {
+        format!("{}/{}", self.base, relative.trim_start_matches('/'))
+    }
+
     pub(crate) fn matches_git_credential(
         &self,
         protocol: &str,

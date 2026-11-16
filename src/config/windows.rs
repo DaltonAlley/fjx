@@ -1,6 +1,6 @@
 //! Windows system calls that restrict and verify the token file's access list.
 //!
-//! This is the crate's only unsafe code. Each call passes buffers that Rust
+//! Each call passes buffers that Rust
 //! owns for the duration of the call, and every byte the system returns is
 //! interpreted by the safe rules in `acl.rs`.
 #![allow(unsafe_code)]

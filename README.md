@@ -217,6 +217,13 @@ nix-shell --run 'cargo build --locked --release'
 The gate runs `cargo build --locked` and `cargo test --locked --all-targets`.
 Tests execute the built CLI against local HTTP servers, temporary repositories,
 and auth/config fixtures; they need no live Forgejo account or credentials.
+The stateful journeys in `tests/e2e_journeys.rs` cover saved-login issue management,
+lost write responses, pagination failure and recovery, and checks followed by a
+PR head change before a guarded merge. They assert server state across separate
+CLI processes, output and exit codes, and absence of duplicate writes. Each CLI
+process has a ten-second deadline; fixture socket operations have two-second
+deadlines. Run just these journeys with `cargo test --locked --test e2e_journeys`.
+They run automatically in the existing PR/main gate and Windows test job.
 Forgejo checks the exact PR head in one **Build and E2E** job on a prepared Dyad
 runner with a five-minute timeout. Only PRs and pushes to `main` run automatically;
 new PR updates cancel superseded runs.

@@ -399,6 +399,75 @@ fn checks_reports_forgejo_empty_status_as_unknown_for_the_requested_head() {
 }
 
 #[test]
+fn checks_accepts_skipped_children_of_a_successful_status() {
+    let status = include_str!("fixtures/forgejo-17.0.2/combined-status-skipped.json");
+    let (host, handle) = server(vec![pull().to_string(), status.into()]);
+    let output = run(&host, &["pr", "checks", "8", "--json"], None);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["state"], "success");
+    assert_eq!(value["statuses"][0]["state"], "success");
+    assert_eq!(value["statuses"][1]["state"], "skipped");
+    assert_eq!(value["statuses"][1]["description"], "Has been skipped");
+    handle.join().unwrap();
+
+    let (host, handle) = server(vec![pull().to_string(), status.into()]);
+    let output = run(&host, &["pr", "checks", "8"], None);
+    assert_eq!(output.status.code(), Some(0));
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.starts_with("abc123\tsuccess\n"));
+    assert!(
+        text.contains("CI / Build and publish release (pull_request)\tskipped\tHas been skipped\t")
+    );
+    handle.join().unwrap();
+}
+
+#[test]
+fn checks_reports_all_skipped_as_skipped_and_unsuccessful() {
+    let status = serde_json::json!({"sha":"abc123","state":"skipped","total_count":2,"statuses":[
+        {"context":"ci / a","status":"skipped"},{"context":"ci / b","status":"skipped"}]});
+    let (host, handle) = server(vec![pull().to_string(), status.to_string()]);
+    let output = run(&host, &["pr", "checks", "8", "--json"], None);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["state"], "skipped");
+    assert_eq!(value["statuses"][0]["state"], "skipped");
+    assert_eq!(value["statuses"][1]["state"], "skipped");
+    handle.join().unwrap();
+}
+
+#[test]
+fn checks_rejects_combined_states_that_contradict_children() {
+    for (state, children, message) in [
+        ("success", &["success", "failure"][..], "successful"),
+        ("success", &["success", "error"], "successful"),
+        ("success", &["success", "pending"], "successful"),
+        ("success", &["skipped", "warning"], "successful"),
+        ("success", &["skipped", "skipped"], "successful"),
+        ("skipped", &["skipped", "success"], "skipped"),
+        ("skipped", &[], "skipped"),
+    ] {
+        let statuses: Vec<_> = children
+            .iter()
+            .map(|child| serde_json::json!({"context":"ci","status":child}))
+            .collect();
+        let status = serde_json::json!({"sha":"abc123","state":state,"statuses":statuses});
+        let (host, handle) = server(vec![pull().to_string(), status.to_string()]);
+        let output = run(&host, &["pr", "checks", "8", "--json"], None);
+        assert_eq!(output.status.code(), Some(7), "{state} {children:?}");
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(
+            stderr,
+            format!("fjx: {message} combined status contradicts child statuses\n")
+        );
+        handle.join().unwrap();
+    }
+}
+
+#[test]
 fn checks_rejects_wrong_head_and_success_child_contradictions() {
     for status in [
         serde_json::json!({"sha":"different","state":"success","statuses":[{"context":"ci","status":"success"}]}),

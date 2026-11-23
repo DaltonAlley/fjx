@@ -634,17 +634,10 @@ fn checks(common: &Args, number: u64) -> Result<Outcome, Error> {
         ));
     }
     let state = normalize_check(&combined.state);
-    if state == "success"
-        && combined.statuses.as_ref().is_none_or(|statuses| {
-            statuses.is_empty()
-                || statuses
-                    .iter()
-                    .any(|status| normalize_check(&status.status) != "success")
-        })
+    if let Some(message) =
+        child_contradiction(state, combined.statuses.as_deref().unwrap_or_default())
     {
-        return Err(Error::data(
-            "successful combined status contradicts child statuses",
-        ));
+        return Err(Error::data(message));
     }
     let statuses = combined
         .statuses
@@ -881,7 +874,32 @@ fn normalize_check(value: &str) -> &'static str {
         "success" => "success",
         "failure" | "error" => "failure",
         "pending" => "pending",
+        "skipped" => "skipped",
         _ => "unknown",
+    }
+}
+
+/// Forgejo 17 sets the combined state to the worst child state, ranked
+/// error < failure < warning < pending < success < skipped. A success result
+/// therefore needs one successful child and allows only skipped others. A
+/// skipped result needs every child skipped.
+fn child_contradiction(state: &str, statuses: &[CommitStatus]) -> Option<&'static str> {
+    let children = || {
+        statuses
+            .iter()
+            .map(|status| normalize_check(&status.status))
+    };
+    match state {
+        "success"
+            if !children().any(|child| child == "success")
+                || children().any(|child| !matches!(child, "success" | "skipped")) =>
+        {
+            Some("successful combined status contradicts child statuses")
+        }
+        "skipped" if statuses.is_empty() || children().any(|child| child != "skipped") => {
+            Some("skipped combined status contradicts child statuses")
+        }
+        _ => None,
     }
 }
 
@@ -975,7 +993,7 @@ fn result(
 
 #[cfg(test)]
 mod tests {
-    use super::{PullRecord, PullResponse, normalize_check};
+    use super::{CommitStatus, PullRecord, PullResponse, child_contradiction, normalize_check};
 
     #[test]
     fn forgejo_pull_fixture_decodes() {
@@ -991,5 +1009,42 @@ mod tests {
     fn check_states_are_closed() {
         assert_eq!(normalize_check("error"), "failure");
         assert_eq!(normalize_check("new-server-state"), "unknown");
+        assert_eq!(normalize_check("skipped"), "skipped");
+        assert_eq!(normalize_check("warning"), "unknown");
+    }
+
+    #[test]
+    fn combined_state_follows_forgejo_child_ranking() {
+        let children = |states: &[&str]| -> Vec<CommitStatus> {
+            states
+                .iter()
+                .map(|state| CommitStatus {
+                    context: "ci".into(),
+                    status: (*state).into(),
+                    description: None,
+                    target_url: None,
+                })
+                .collect()
+        };
+        for (state, statuses, consistent) in [
+            ("success", &["success"][..], true),
+            ("success", &["success", "skipped"], true),
+            ("success", &["skipped", "success", "skipped"], true),
+            ("success", &[], false),
+            ("success", &["skipped"], false),
+            ("success", &["success", "failure"], false),
+            ("success", &["success", "error"], false),
+            ("success", &["success", "pending"], false),
+            ("success", &["success", "warning"], false),
+            ("success", &["success", "new-server-state"], false),
+            ("skipped", &["skipped", "skipped"], true),
+            ("skipped", &[], false),
+            ("skipped", &["skipped", "success"], false),
+            ("failure", &["success", "failure"], true),
+            ("pending", &["skipped", "pending"], true),
+        ] {
+            let result = child_contradiction(state, &children(statuses));
+            assert_eq!(result.is_none(), consistent, "{state} {statuses:?}");
+        }
     }
 }

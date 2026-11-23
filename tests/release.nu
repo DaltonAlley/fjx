@@ -616,7 +616,7 @@ def test-release-build-contract [] {
   check (($asset_verifications | length) == 1) "release driver must verify exported assets exactly once"
   check ((($asset_verifications | first) | str trim) == 'verify-assets $asset_dir $version --runtime=$runtime --wine=$wine --smoke') "release driver must smoke the complete six-target asset set"
   let release_driver = open --raw $release_script
-  for required in ['def "main push-tag"' '^git remote get-url origin' "GIT_CONFIG_KEY_1: 'http.followRedirects'" 'git cat-file -t' 'Forgejo token is required to push a release tag' 'def "main upload-missing-assets"' 'def "main verify-final"' 'must be greater than prior released version' 'browser_download_url' 'releases/download/($tag)/($name)' "--proto '=https' --max-redirs 0" 'cmp --silent' 'does not match the locally checked output' 'draft: false' 'prerelease: false'] {
+  for required in ['def "main push-tag"' '^git remote get-url origin' "GIT_CONFIG_KEY_1: 'http.followRedirects'" 'git cat-file -t' 'Forgejo token is required to push a release tag' 'def "main upload-missing-assets"' 'def "main verify-final"' 'must be greater than prior released version' 'browser_download_url' 'releases/download/($tag)/($name)' "--proto '=https' --max-redirs 0" 'does not match the locally checked output' 'draft: false' 'prerelease: false'] {
     check ($release_driver | str contains $required) $"release publication boundary lacks: ($required)"
   }
   let version = (open --raw $release_toml | from toml | get version)

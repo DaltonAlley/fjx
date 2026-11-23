@@ -38,8 +38,8 @@ jobs:
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
 
-      - name: Build and run local CLI tests
-        run: nu --no-config-file scripts/check.nu
+      - name: Build and test the CLI and release tooling
+        run: nu --no-config-file scripts/check.nu --full
 
       - name: Check for a version bump
         id: version
@@ -74,9 +74,6 @@ jobs:
             git fetch --no-tags origin "$CHECKOUT_SHA"
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
-
-      - name: Check release tooling
-        run: nu --no-config-file scripts/check.nu --full
 
       - name: Build, verify, and publish all six targets
         env:

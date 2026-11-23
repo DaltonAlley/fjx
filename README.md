@@ -395,7 +395,7 @@ Plain output is stable and short. Each tab separates fields and each line feed e
 
 Use Rust 1.97.1 from `rust-toolchain.toml` and Nushell 0.112.2. Linux tests
 also require Git, Bash, and `script` (util-linux). Run the same build and E2E
-gate as CI from the repository root:
+gate as GitHub CI from the repository root:
 
 ```sh
 nu --no-config-file scripts/check.nu
@@ -423,8 +423,8 @@ Forgejo checks the exact PR head in one **Build and E2E** job on a prepared Dyad
 runner with a five-minute timeout. Only PRs and pushes to `main` run automatically;
 new PR updates cancel superseded runs.
 
-For maintenance and before a release, run `nu --no-config-file scripts/check.nu --full`.
-This also runs format, Clippy, docs, repository and release-tool fixtures, and
+To run the Forgejo gate locally, use `nu --no-config-file scripts/check.nu --full`.
+It also runs format, Clippy, docs, repository and release-tool fixtures, and
 version validation. It additionally needs GNU coreutils, `tar`, `gzip`, `zip`,
 `unzip`, and `file`.
 

@@ -362,8 +362,10 @@ def verify-remote-assets [release: record, version: string] {
       let destination = $downloaded | path join $name
       let fetched = download-release-asset $asset $name
       mv $fetched $destination
-      let comparison = do { ^cmp --silent ($local | path join $name) $destination } | complete
-      if $comparison.exit_code != 0 { rm --recursive --force $downloaded; fail $"remote release asset ($name) does not match the locally checked output" }
+      let local_bytes = open --raw ($local | path join $name) | into binary
+      if (open --raw $destination | into binary) != $local_bytes {
+        fail $"remote release asset ($name) does not match the locally checked output"
+      }
     }
     verify-downloaded-assets $downloaded $version
   } catch {|error|

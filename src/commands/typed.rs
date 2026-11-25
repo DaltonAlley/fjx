@@ -171,8 +171,7 @@ impl RepoClient {
         struct Repository {
             default_branch: String,
         }
-        let relative = format!("repos/{}/{}", self.owner, self.repo);
-        let (repository, _) = self.get::<Repository>(&relative, "repository")?;
+        let (repository, _) = self.get::<Repository>(&self.root(), "repository")?;
         if repository.default_branch.is_empty() {
             return Err(Error::data("Forgejo returned an empty default branch"));
         }
@@ -192,6 +191,16 @@ impl RepoClient {
             owner,
             repo,
         })
+    }
+
+    /// The API path of the repository itself.
+    pub(crate) fn root(&self) -> String {
+        format!("repos/{}/{}", self.owner, self.repo)
+    }
+
+    /// `OWNER/REPO`, for messages.
+    pub(crate) fn name(&self) -> String {
+        format!("{}/{}", self.owner, self.repo)
     }
 
     pub(crate) fn path(&self, suffix: &str) -> String {

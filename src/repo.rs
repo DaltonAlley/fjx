@@ -48,6 +48,9 @@ fn valid_part(value: &str) -> bool {
 pub(crate) struct RemoteContext {
     pub(crate) host: Host,
     pub(crate) repo: Repo,
+    /// The SSH host of a remote that matched no saved login, so `host` is only
+    /// a guess that the same name serves HTTPS.
+    pub(crate) unmatched_ssh_host: Option<String>,
 }
 
 pub(crate) fn infer(
@@ -167,6 +170,7 @@ pub(crate) fn parse_remote(value: &str, config: &Config) -> Result<RemoteContext
         return Ok(RemoteContext {
             host: Host::parse(&base)?,
             repo,
+            unmatched_ssh_host: None,
         });
     }
     if let Some(rest) = value.strip_prefix("ssh://") {
@@ -224,18 +228,25 @@ fn ssh_context(dns: &str, path: &str, config: &Config) -> Result<RemoteContext, 
         return Err(Error::context("invalid SSH remote host"));
     }
     let (prefix, repo) = split_remote_path(path)?;
-    let host = config.host_matching_dns(dns).map_or_else(
-        || {
-            let base = if prefix.is_empty() {
-                format!("https://{dns}")
-            } else {
-                format!("https://{dns}/{prefix}")
-            };
-            Host::parse(&base)
-        },
-        Ok,
-    )?;
-    Ok(RemoteContext { host, repo })
+    // A saved login decides the web host, including its base path. An SSH
+    // alias applies only here: an HTTPS remote already names its host.
+    if let Some(host) = config.host_for_ssh(dns) {
+        return Ok(RemoteContext {
+            host,
+            repo,
+            unmatched_ssh_host: None,
+        });
+    }
+    let base = if prefix.is_empty() {
+        format!("https://{dns}")
+    } else {
+        format!("https://{dns}/{prefix}")
+    };
+    Ok(RemoteContext {
+        host: Host::parse(&base)?,
+        repo,
+        unmatched_ssh_host: Some(dns.to_owned()),
+    })
 }
 
 fn split_remote_path(path: &str) -> Result<(String, Repo), Error> {
@@ -263,7 +274,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{Repo, infer_from_remotes, parse_remote};
-    use crate::config::Config;
+    use crate::config::{Config, Token};
+    use crate::host::Host;
 
     #[test]
     fn validates_repo_parts() {
@@ -309,6 +321,45 @@ mod tests {
                 "owner/repo"
             );
         }
+    }
+
+    #[test]
+    fn ssh_remotes_resolve_through_saved_logins_and_their_aliases() {
+        let host =
+            Host::parse("https://code.example/gitea").unwrap_or_else(|error| panic!("{error}"));
+        let mut config = Config::empty();
+        config
+            .login(
+                &host,
+                "user".to_owned(),
+                Token::parse("secret".to_owned()).unwrap_or_else(|error| panic!("{error}")),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        config
+            .add_ssh_alias(&host, "forge-ssh")
+            .unwrap_or_else(|error| panic!("{error}"));
+        for remote in [
+            "ssh://git@forge-ssh:2222/owner/project.git",
+            "git@forge-ssh:owner/project.git",
+            "ssh://git@Forge-SSH/owner/project",
+            "ssh://git@code.example:2222/owner/project.git",
+        ] {
+            let parsed =
+                parse_remote(remote, &config).unwrap_or_else(|error| panic!("{remote}: {error}"));
+            assert_eq!(parsed.host, host, "{remote}");
+            assert_eq!(parsed.repo.owner(), "owner");
+            assert_eq!(parsed.repo.name(), "project");
+            assert!(parsed.unmatched_ssh_host.is_none(), "{remote}");
+        }
+        // Without a saved login the SSH name is only a guess, and says so.
+        let guessed = parse_remote("ssh://git@other:2222/owner/project.git", &config)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(guessed.host.as_str(), "https://other");
+        assert_eq!(guessed.unmatched_ssh_host.as_deref(), Some("other"));
+        // An alias never rewrites a remote that names its HTTPS host.
+        let https = parse_remote("https://forge-ssh/owner/project.git", &config)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(https.host.as_str(), "https://forge-ssh");
     }
 
     #[test]

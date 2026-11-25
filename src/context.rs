@@ -87,7 +87,11 @@ impl Context {
                 "repository context is required; use -R OWNER/REPO",
             ));
         }
-        let selected_host = explicit_host.or_else(|| remote.map(|value| value.host));
+        let (remote_host, unmatched_ssh_host) = remote.map_or((None, None), |value| {
+            (Some(value.host), value.unmatched_ssh_host)
+        });
+        let unmatched_ssh_host = unmatched_ssh_host.filter(|_| explicit_host.is_none());
+        let selected_host = explicit_host.or(remote_host);
         let host = match selected_host {
             Some(host) => host,
             None => config
@@ -108,8 +112,14 @@ impl Context {
             (None, None)
         };
         if need_token && token.is_none() {
+            // The remote's SSH name was only assumed to serve HTTPS as well.
+            let hint = unmatched_ssh_host.map_or_else(String::new, |name| {
+                format!(
+                    "; if {name} is an SSH alias for a host you are logged in to, run fjx auth add-ssh-alias {name} --host URL"
+                )
+            });
             return Err(Error::context(format!(
-                "no token is available for {}",
+                "no token is available for {}{hint}",
                 host.as_str()
             )));
         }

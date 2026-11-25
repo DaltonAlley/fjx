@@ -27,7 +27,9 @@ pub(crate) enum Command {
     AuthLogout,
     AuthSetupGit,
     AuthGitCredential { operation: GitCredentialOperation },
+    AuthSshAlias { alias: String, remove: bool },
     RepoView,
+    Board(BoardArgs),
     McpServe,
     McpConfig,
     Org(OrgArgs),
@@ -74,6 +76,45 @@ impl WebhookArgs {
             Self::Edit { .. } => "edit",
             Self::Delete { .. } => "delete",
             Self::Test { .. } => "test",
+        }
+    }
+}
+
+/// A board named by title or by ID. As with labels and milestones, an ID is
+/// never guessed from a numeric-looking title.
+#[derive(Debug)]
+pub(crate) enum BoardSelector {
+    Title(String),
+    Id(u64),
+}
+
+#[derive(Debug)]
+pub(crate) enum BoardArgs {
+    List {
+        state: ListState,
+        paging: PageArgs,
+    },
+    View {
+        board: Option<BoardSelector>,
+    },
+    Move {
+        number: u64,
+        column: String,
+        board: Option<BoardSelector>,
+    },
+    Remove {
+        number: u64,
+        board: Option<BoardSelector>,
+    },
+}
+
+impl BoardArgs {
+    pub(crate) const fn action(&self) -> &'static str {
+        match self {
+            Self::List { .. } => "list",
+            Self::View { .. } => "view",
+            Self::Move { .. } => "move",
+            Self::Remove { .. } => "remove",
         }
     }
 }
@@ -218,6 +259,7 @@ pub(crate) enum IssueArgs {
         title: String,
         body: Option<BodySource>,
         metadata: MetadataArgs,
+        board: Option<BoardSelector>,
     },
     Comment {
         number: u64,
@@ -522,6 +564,8 @@ struct Specific {
     commit: Option<String>,
     match_head: Option<String>,
     auto: bool,
+    board: Option<String>,
+    board_id: Option<u64>,
 }
 
 #[allow(
@@ -724,6 +768,15 @@ fn parse_parser(mut parser: lexopt::Parser) -> Result<Args, Error> {
                 set_switch(&mut specific.edit.clear_milestone, "--clear-milestone")?;
             }
             Long("auto") => set_switch(&mut specific.auto, "--auto")?,
+            Long("board") => {
+                let value = string_value(&mut parser, "--board")?;
+                set_once(&mut specific.board, nonempty(&value, "--board")?, "--board")?;
+            }
+            Long("board-id") => set_once(
+                &mut specific.board_id,
+                positive(&string_value(&mut parser, "--board-id")?, "board ID")?,
+                "--board-id",
+            )?,
             Long("comments-file") => set_once(
                 &mut specific.comments_file,
                 os_value(&mut parser)?,
@@ -858,6 +911,22 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
                 }
             }))
         }
+        [a, b] if a == "board" && b == "list" => Ok(Command::Board(BoardArgs::List {
+            state: o.take_state()?,
+            paging: o.take_paging()?,
+        })),
+        [a, b] if a == "board" && b == "view" => Ok(Command::Board(BoardArgs::View {
+            board: o.take_board()?,
+        })),
+        [a, b, n, column] if a == "board" && b == "move" => Ok(Command::Board(BoardArgs::Move {
+            number: positive(n, "issue number")?,
+            column: nonempty(column, "column title")?,
+            board: o.take_board()?,
+        })),
+        [a, b, n] if a == "board" && b == "remove" => Ok(Command::Board(BoardArgs::Remove {
+            number: positive(n, "issue number")?,
+            board: o.take_board()?,
+        })),
         [a, b, n] if a == "issue" && b == "comments" => Ok(Command::Issue(IssueArgs::Comments {
             number: positive(n, "issue number")?,
             paging: o.take_paging()?,
@@ -911,6 +980,14 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
             };
             Ok(Command::AuthGitCredential { operation })
         }
+        [a, b, alias]
+            if a == "auth" && matches!(b.as_str(), "add-ssh-alias" | "remove-ssh-alias") =>
+        {
+            Ok(Command::AuthSshAlias {
+                alias: nonempty(alias, "SSH alias")?,
+                remove: b == "remove-ssh-alias",
+            })
+        }
         [a, b] if a == "repo" && b == "view" => Ok(Command::RepoView),
         [a, b] if a == "issue" && b == "list" => Ok(Command::Issue(IssueArgs::List {
             state: o.take_state()?,
@@ -924,6 +1001,7 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
             title: o.take_required_title()?,
             body: o.take_body(false)?,
             metadata: o.take_metadata()?,
+            board: o.take_board()?,
         })),
         [a, b, n] if a == "issue" && b == "comment" => Ok(Command::Issue(IssueArgs::Comment {
             number: positive(n, "issue number")?,
@@ -1186,6 +1264,15 @@ impl Specific {
             return Err(Error::usage("--milestone conflicts with --milestone-id"));
         }
         Ok(std::mem::take(&mut self.metadata))
+    }
+
+    fn take_board(&mut self) -> Result<Option<BoardSelector>, Error> {
+        match (self.board.take(), self.board_id.take()) {
+            (Some(_), Some(_)) => Err(Error::usage("--board conflicts with --board-id")),
+            (Some(title), None) => Ok(Some(BoardSelector::Title(title))),
+            (None, Some(id)) => Ok(Some(BoardSelector::Id(id))),
+            (None, None) => Ok(None),
+        }
     }
 
     fn take_issue_filters(&mut self) -> Result<IssueFilters, Error> {
@@ -1519,6 +1606,8 @@ impl Specific {
             (self.commit.is_some(), "--commit"),
             (self.match_head.is_some(), "--match-head"),
             (self.auto, "--auto"),
+            (self.board.is_some(), "--board"),
+            (self.board_id.is_some(), "--board-id"),
             (self.with_token, "--with-token"),
             (self.web, "--web"),
             (self.no_browser, "--no-browser"),
@@ -1570,8 +1659,17 @@ fn overlaps<T: PartialEq>(add: &[T], remove: &[T]) -> bool {
 
 fn subcommands(group: &str) -> &'static [&'static str] {
     match group {
-        "auth" => &["login", "status", "logout", "setup-git", "git-credential"],
+        "auth" => &[
+            "login",
+            "status",
+            "logout",
+            "setup-git",
+            "git-credential",
+            "add-ssh-alias",
+            "remove-ssh-alias",
+        ],
         "repo" => &["view"],
+        "board" => &["list", "view", "move", "remove"],
         "org" => &[
             "list",
             "view",
@@ -1668,6 +1766,11 @@ fn command_help_path(words: &[String]) -> Result<Vec<String>, Error> {
                 3
             }
         }
+        [group, command] if group == "board" => match command.as_str() {
+            "move" => 4,
+            "remove" => 3,
+            _ => 2,
+        },
         [group, command] if group == "pr" && command == "review-comments" => 4,
         [group, command] if group == "release" && command == "upload" => 4,
         [_, command]
@@ -1732,8 +1835,12 @@ fn consume_help_flags(path: &[String], o: &mut Specific) -> Result<(), Error> {
         o.limit.take();
         o.all = false;
     }
-    if command == "list" && matches!(group, "issue" | "pr" | "milestone") {
+    if command == "list" && matches!(group, "issue" | "pr" | "milestone" | "board") {
         o.state.take();
+    }
+    if (group == "board" && command != "list") || (group == "issue" && command == "create") {
+        o.board.take();
+        o.board_id.take();
     }
     if command == "list" && matches!(group, "issue" | "pr") {
         o.metadata.labels.clear();

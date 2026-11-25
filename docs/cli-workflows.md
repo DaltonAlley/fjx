@@ -115,6 +115,31 @@ ambiguous names fail before writes. Use explicit IDs when names are ambiguous or
 when applying an organization label not returned by the repository label listing.
 An ID is not guessed from a numeric-looking name. IDs must be positive.
 
+### Track issues on a project board
+
+```text
+fjx board view
+fjx board view --json --fields title,cards
+fjx board move 42 "In Progress"
+fjx board move 42 done --board Development --dry-run
+fjx board remove 42
+fjx issue create --title "Timeout during sync" --board Development --dry-run
+```
+
+Boards are Gitea repository projects; Forgejo has no project API, and board
+commands exit 7 there before writing. The forge's card routes take an issue's
+forge-wide ID and a column ID. fjx resolves both from the issue number and the
+column title, so `board move` reads the board, its columns and the issue, then
+sends one write. That write adds the card when the issue is not on the board and
+moves it otherwise. `board remove` reads each column to find the card. A dry run
+makes the same reads and prints the write it would send.
+
+The repository's only open board is implied. Otherwise select one with
+`--board TITLE` or `--board-id ID`. Titles match exactly, then ignoring case; an
+unknown or ambiguous board or column fails before the write and lists the
+available titles. `issue create --board` resolves the board before creating the
+issue and puts the new card in the board's default column.
+
 ### Safety of multi-step edits
 
 All local validation and required identifier/assignee reads finish before the

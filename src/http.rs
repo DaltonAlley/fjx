@@ -207,10 +207,13 @@ impl Client {
             Ok(response) => response,
             Err(ureq::Error::Status(status, response)) => {
                 let detail = error_message(response, self.token.as_str());
-                return Err(Error::api(match detail {
-                    Some(message) => format!("Forgejo returned HTTP {status}: {message}"),
-                    None => format!("Forgejo returned HTTP {status}"),
-                }));
+                return Err(Error::http(
+                    status,
+                    match detail {
+                        Some(message) => format!("Forgejo returned HTTP {status}: {message}"),
+                        None => format!("Forgejo returned HTTP {status}"),
+                    },
+                ));
             }
             Err(ureq::Error::Transport(_)) => {
                 return Err(Error::network("Forgejo request failed"));

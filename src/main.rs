@@ -57,6 +57,8 @@ fn run(args: &Args) -> Result<Outcome, Error> {
         Command::AuthGitCredential { operation } => {
             commands::auth::git_credential(args, *operation)
         }
+        Command::AuthSshAlias { alias, remove } => commands::auth::ssh_alias(args, alias, *remove),
+        Command::Board(command) => commands::board::run(args, command),
         Command::McpServe => mcp::serve(args),
         Command::McpConfig => mcp::config(args),
         Command::Org(command) => commands::org::run(args, command),

@@ -184,7 +184,8 @@ pub(crate) fn run(common: &Args, args: &IssueArgs) -> Result<Outcome, Error> {
             title,
             body,
             metadata,
-        } => create(common, title, body.as_ref(), metadata),
+            board,
+        } => create(common, title, body.as_ref(), metadata, board.as_ref()),
         IssueArgs::Comments { number, paging } => {
             reject_read_flags(common, "issue comments")?;
             let repo = RepoClient::resolve(common)?;
@@ -217,11 +218,17 @@ fn create(
     title: &str,
     source: Option<&crate::args::BodySource>,
     metadata: &MetadataArgs,
+    board: Option<&crate::args::BoardSelector>,
 ) -> Result<Outcome, Error> {
     reject_yes(common, "issue create")?;
     let body = source.map(read_body).transpose()?;
     let repo = RepoClient::resolve(common)?;
     let mut payload = triage::resolve_metadata(&repo, metadata)?;
+    if let Some(board) = board {
+        // Resolving first keeps a forge without boards from creating the
+        // issue and silently dropping its card.
+        payload["projects"] = json!([super::board::resolve_id(&repo, board)?]);
+    }
     payload["title"] = json!(title);
     if let Some(body) = body {
         payload["body"] = json!(body);

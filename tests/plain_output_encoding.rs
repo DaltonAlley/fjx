@@ -289,7 +289,7 @@ fn auth_plain_fields_are_reversible_and_json_keeps_original_values() {
     let (json_output, json_host) = invoke(&root, &json_args, &[json!({"login": RAW})]);
     assert_json(
         &json_output,
-        &json!({"kind": "auth", "host": json_host, "user": RAW, "source": "FJX_TOKEN"}),
+        &json!({"kind": "auth", "host": json_host, "user": RAW, "source": "FJX_TOKEN", "ssh_aliases": []}),
     );
     fs::remove_dir_all(root).unwrap_or_else(|error| panic!("{error}"));
 }

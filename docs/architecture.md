@@ -37,7 +37,9 @@ mechanism. See the [MCP setup and limits](../README.md#mcp-for-local-agents).
 metadata resolution and planned multi-step issue/PR edits. It resolves the full
 plan before sending writes, preserves unrelated labels, and reports completed
 requests if a later step fails. Assignee replacement is a documented read-modify-
-write race, not an atomic operation. Raw API path validation belongs to
+write race, not an atomic operation. `commands/board.rs` resolves a board,
+its columns and an issue's forge-wide ID before its one card write, and reports
+a forge without project routes as incompatible data. Raw API path validation belongs to
 `commands/api.rs`; do not duplicate it in the CLI parser or transport.
 
 `main` validates requested output field names against the command's discovery
@@ -50,7 +52,11 @@ credentials or repository context.
 
 Explicit `--host` and `-R` override their `FJX_HOST` and `FJX_REPO` environment
 counterparts. Missing context can be inferred from repository remotes; the saved
-default host is a final host fallback. Tokens resolve in order: `FJX_TOKEN`,
+default host is a final host fallback. An SSH remote selects the saved login
+with that DNS name, then the saved login that records the SSH host as an alias.
+Only saved logins are candidates, one alias names one login, and an HTTPS remote
+is never rewritten, so a remote cannot direct a saved token to a new host. An
+unmatched SSH host is only a guess at the web host. Tokens resolve in order: `FJX_TOKEN`,
 `FORGEJO_TOKEN`, then the saved token for the selected host. Invalid environment
 values fail rather than silently choosing another token.
 

@@ -79,6 +79,10 @@ struct HostEntry {
     token: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     oauth: Option<OAuthCredentials>,
+    /// SSH host names in repository remotes that stand for this web host,
+    /// such as a `Host` alias from the user's SSH configuration.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ssh_aliases: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -183,6 +187,18 @@ impl Config {
             if entry.user.as_deref().is_some_and(|user| !valid_user(user)) {
                 return Err(Error::context("invalid user in token file"));
             }
+            for alias in &entry.ssh_aliases {
+                // One alias must select one saved login, never a choice of tokens.
+                let owners = self
+                    .hosts
+                    .values()
+                    .flat_map(|other| &other.ssh_aliases)
+                    .filter(|other| *other == alias)
+                    .count();
+                if !valid_ssh_alias(alias) || owners != 1 {
+                    return Err(Error::context("invalid SSH alias in token file"));
+                }
+            }
         }
         Ok(())
     }
@@ -240,23 +256,104 @@ impl Config {
         Ok(())
     }
 
-    pub(crate) fn host_matching_dns(&self, dns: &str) -> Option<Host> {
+    fn host_matching_dns(&self, dns: &str) -> Option<Host> {
         self.hosts
             .keys()
             .filter_map(|value| Host::parse(value).ok())
             .find(|host| host.dns_host().eq_ignore_ascii_case(dns))
     }
 
+    /// The saved login an SSH remote stands for: the host with that DNS name,
+    /// otherwise the host that records the name as an SSH alias. Only saved
+    /// logins are candidates, so a remote cannot direct a token to a new host.
+    pub(crate) fn host_for_ssh(&self, ssh_host: &str) -> Option<Host> {
+        self.host_matching_dns(ssh_host).or_else(|| {
+            let alias = ssh_host.to_ascii_lowercase();
+            self.hosts
+                .iter()
+                .find(|(_, entry)| entry.ssh_aliases.contains(&alias))
+                .and_then(|(value, _)| Host::parse(value).ok())
+        })
+    }
+
+    pub(crate) fn ssh_aliases(&self, host: &Host) -> &[String] {
+        self.hosts
+            .get(host.as_str())
+            .map_or(&[], |entry| entry.ssh_aliases.as_slice())
+    }
+
+    /// Record an alias on a saved login. Returns the stored (lowercase) name.
+    pub(crate) fn add_ssh_alias(&mut self, host: &Host, alias: &str) -> Result<String, Error> {
+        let alias = alias.to_ascii_lowercase();
+        if !valid_ssh_alias(&alias) {
+            return Err(Error::usage(
+                "SSH alias must be a host name of letters, digits, '.' or '-' (up to 253 bytes)",
+            ));
+        }
+        if !self.hosts.contains_key(host.as_str()) {
+            return Err(Error::context(format!(
+                "no saved login for {}; run fjx auth login --host {} first",
+                host.as_str(),
+                host.as_str()
+            )));
+        }
+        if let Some(named) = self.host_matching_dns(&alias) {
+            return Err(Error::usage(format!(
+                "{alias} is the DNS name of saved host {}; its SSH remotes already resolve there",
+                named.as_str()
+            )));
+        }
+        if let Some((other, _)) = self
+            .hosts
+            .iter()
+            .find(|(value, entry)| *value != host.as_str() && entry.ssh_aliases.contains(&alias))
+        {
+            return Err(Error::usage(format!(
+                "SSH alias {alias} already names {other}; run fjx auth remove-ssh-alias {alias} --host {other} first"
+            )));
+        }
+        if let Some(entry) = self.hosts.get_mut(host.as_str())
+            && !entry.ssh_aliases.contains(&alias)
+        {
+            entry.ssh_aliases.push(alias.clone());
+            entry.ssh_aliases.sort_unstable();
+        }
+        Ok(alias)
+    }
+
+    pub(crate) fn remove_ssh_alias(&mut self, host: &Host, alias: &str) -> Result<String, Error> {
+        let alias = alias.to_ascii_lowercase();
+        let entry = self
+            .hosts
+            .get_mut(host.as_str())
+            .filter(|entry| entry.ssh_aliases.contains(&alias))
+            .ok_or_else(|| {
+                Error::usage(format!(
+                    "no SSH alias {alias:?} is recorded for {}",
+                    host.as_str()
+                ))
+            })?;
+        entry.ssh_aliases.retain(|existing| *existing != alias);
+        Ok(alias)
+    }
+
     pub(crate) fn login(&mut self, host: &Host, user: String, token: Token) -> Result<(), Error> {
         if !valid_user(&user) {
             return Err(Error::data("Forgejo returned an invalid user name"));
         }
+        // A new token for the same host keeps the aliases that point at it.
+        let ssh_aliases = self
+            .hosts
+            .remove(host.as_str())
+            .map(|entry| entry.ssh_aliases)
+            .unwrap_or_default();
         self.hosts.insert(
             host.as_str().to_owned(),
             HostEntry {
                 user: Some(user),
                 token: token.into_string(),
                 oauth: None,
+                ssh_aliases,
             },
         );
         self.default_host = Some(host.as_str().to_owned());
@@ -507,6 +604,16 @@ pub(crate) fn persistence_unavailable() -> Error {
 
 fn valid_user(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_control)
+}
+
+/// Stored aliases are lowercase and use the characters `repo` accepts in an
+/// SSH remote host.
+fn valid_ssh_alias(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 253
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+        })
 }
 
 pub(crate) fn validate_client_id(value: &str) -> Result<(), Error> {
@@ -961,6 +1068,114 @@ mod tests {
             windows_default_path(None, None).unwrap_or_else(|error| panic!("{error}")),
             None
         );
+    }
+
+    fn logged_in(hosts: &[&str]) -> Config {
+        let mut config = Config::empty();
+        for value in hosts {
+            let host = Host::parse(value).unwrap_or_else(|error| panic!("{error}"));
+            config
+                .login(
+                    &host,
+                    "user".to_owned(),
+                    Token::parse(format!("token-for-{value}"))
+                        .unwrap_or_else(|error| panic!("{error}")),
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
+        config
+    }
+
+    #[test]
+    fn ssh_aliases_resolve_only_to_the_saved_login_that_records_them() {
+        let gitea = Host::parse("https://code.example").unwrap_or_else(|error| panic!("{error}"));
+        let forgejo =
+            Host::parse("https://forge.example/base").unwrap_or_else(|error| panic!("{error}"));
+        let mut config = logged_in(&["https://code.example", "https://forge.example/base"]);
+        assert!(config.host_for_ssh("forge-ssh").is_none());
+        assert_eq!(
+            config
+                .add_ssh_alias(&gitea, "Forge-SSH")
+                .unwrap_or_else(|error| panic!("{error}")),
+            "forge-ssh"
+        );
+        // Recording the same alias again changes nothing.
+        config
+            .add_ssh_alias(&gitea, "forge-ssh")
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(config.ssh_aliases(&gitea), ["forge-ssh"]);
+        assert_eq!(config.host_for_ssh("FORGE-SSH"), Some(gitea.clone()));
+        assert_eq!(config.host_for_ssh("forge.example"), Some(forgejo.clone()));
+        assert!(config.host_for_ssh("other").is_none());
+
+        // One alias never selects between two tokens.
+        assert_eq!(
+            config
+                .add_ssh_alias(&forgejo, "forge-ssh")
+                .err()
+                .map(|error| error.code()),
+            Some(2)
+        );
+        // A saved host's own DNS name always wins, so it cannot be an alias.
+        for (host, alias) in [(&gitea, "forge.example"), (&gitea, "code.example")] {
+            assert!(config.add_ssh_alias(host, alias).is_err(), "{alias}");
+        }
+        for alias in ["", "bad host", "a/b", "user@forge-ssh", "forge-ssh:22"] {
+            assert!(config.add_ssh_alias(&gitea, alias).is_err(), "{alias:?}");
+        }
+        let unknown = Host::parse("https://new.example").unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            config
+                .add_ssh_alias(&unknown, "elsewhere")
+                .err()
+                .map(|error| error.code()),
+            Some(3)
+        );
+        assert!(config.host_for_ssh("elsewhere").is_none());
+
+        // A new token for the host keeps its aliases; logout drops them.
+        config
+            .login(
+                &gitea,
+                "user".to_owned(),
+                Token::parse("rotated".to_owned()).unwrap_or_else(|error| panic!("{error}")),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(config.host_for_ssh("forge-ssh"), Some(gitea.clone()));
+        assert!(config.remove_ssh_alias(&gitea, "missing").is_err());
+        config
+            .remove_ssh_alias(&gitea, "forge-ssh")
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(config.host_for_ssh("forge-ssh").is_none());
+        config
+            .add_ssh_alias(&gitea, "forge-ssh")
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(config.logout(&gitea));
+        assert!(config.host_for_ssh("forge-ssh").is_none());
+    }
+
+    #[test]
+    fn token_files_with_shared_or_malformed_ssh_aliases_are_rejected() {
+        for (first, second) in [
+            (r#"["forge-ssh"]"#, r#"["forge-ssh"]"#),
+            (r#"["Forge-SSH"]"#, "[]"),
+            (r#"["bad host"]"#, "[]"),
+            (r#"["forge-ssh","forge-ssh"]"#, "[]"),
+        ] {
+            let text = format!(
+                r#"{{"version":1,"default_host":null,"hosts":{{"https://one.example":{{"token":"a","ssh_aliases":{first}}},"https://two.example":{{"token":"b","ssh_aliases":{second}}}}}}}"#
+            );
+            let config: Config =
+                serde_json::from_str(&text).unwrap_or_else(|error| panic!("{error}"));
+            assert!(config.validate().is_err(), "{text}");
+        }
+        let text = r#"{"version":1,"default_host":null,"hosts":{"https://one.example":{"token":"a","ssh_aliases":["forge-ssh"]},"https://two.example":{"token":"b"}}}"#;
+        let config: Config = serde_json::from_str(text).unwrap_or_else(|error| panic!("{error}"));
+        config.validate().unwrap_or_else(|error| panic!("{error}"));
+        // Hosts without aliases keep the file format older versions wrote.
+        let saved = serde_json::to_string(&logged_in(&["https://one.example"]))
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(!saved.contains("ssh_aliases"), "{saved}");
     }
 
     #[test]

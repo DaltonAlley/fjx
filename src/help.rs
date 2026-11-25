@@ -167,6 +167,31 @@ const PR_COMMENT: &[&str] = &[
     "new_position",
     "pull_request_review_id",
 ];
+const BOARD: &[&str] = &[
+    "kind",
+    "id",
+    "title",
+    "description",
+    "state",
+    "open_issues",
+    "closed_issues",
+    "html_url",
+    "created_at",
+    "updated_at",
+];
+const BOARD_COLUMN: &[&str] = &["kind", "board", "id", "title", "default", "cards"];
+const BOARD_RESULT: &[&str] = &[
+    "kind",
+    "action",
+    "ok",
+    "number",
+    "board",
+    "column",
+    "column_id",
+];
+const SSH_ALIAS_RESULT: &[&str] = &["kind", "action", "ok", "host", "ssh_alias"];
+const BOARD_FLAG: &str =
+    "--board TITLE | --board-id ID (default: the repository's only open board)";
 const PAGING: &str = "--page N (default 1), --all, --limit N (default 30)";
 const BODY: &str = "--body TEXT | --body-file PATH|-";
 const METADATA: &str = "--label NAME, --label-id ID, --assignee NAME (repeatable), --milestone NAME | --milestone-id ID";
@@ -257,10 +282,12 @@ impl CommandMeta {
             "team add-member" | "team remove-member" => &["id", "user"],
             "team add-repo" | "team remove-repo" => &["id", "repo"],
             "auth git-credential" => &["operation"],
+            "auth add-ssh-alias" | "auth remove-ssh-alias" => &["alias"],
+            "board move" => &["number", "column"],
             "issue view" | "issue comments" | "issue comment" | "issue edit" | "issue close"
             | "issue reopen" | "pr view" | "pr comments" | "pr comment" | "pr edit"
             | "pr close" | "pr reopen" | "pr reviews" | "pr files" | "pr request-review"
-            | "pr diff" | "pr checks" | "pr review" | "pr merge" => &["number"],
+            | "pr diff" | "pr checks" | "pr review" | "pr merge" | "board remove" => &["number"],
             "pr review-comments" => &["number", "review_id"],
             "team view" | "team edit" | "team delete" | "team members" | "team repos"
             | "run view" | "run watch" | "webhook view" | "webhook edit" | "webhook delete"
@@ -281,7 +308,7 @@ impl CommandMeta {
             })
             .collect();
         match self.name {
-            "issue list" | "pr list" | "milestone list" => {
+            "issue list" | "pr list" | "milestone list" | "board list" => {
                 arguments
                     .enum_values
                     .insert("--state", &["open", "closed", "all"]);
@@ -309,7 +336,35 @@ impl CommandMeta {
             _ => {}
         }
         self.argument_constraints(&mut arguments);
+        self.board_and_alias_constraints(&mut arguments);
         arguments
+    }
+
+    fn board_and_alias_constraints(&self, arguments: &mut ArgumentMetadata) {
+        match self.name {
+            "board view" | "board move" | "board remove" => {
+                arguments
+                    .mutually_exclusive
+                    .push(&["--board", "--board-id"]);
+                arguments.constraints.push(
+                    "--board or --board-id is required when the repository has no open board or more than one",
+                );
+            }
+            "issue create" => arguments
+                .mutually_exclusive
+                .push(&["--board", "--board-id"]),
+            "auth add-ssh-alias" | "auth remove-ssh-alias" => {
+                arguments
+                    .constraints
+                    .push("requires --host URL or FJX_HOST; the host is never inferred");
+                if self.name == "auth add-ssh-alias" {
+                    arguments.constraints.push(
+                        "the host needs a saved login; an alias names one host and cannot be a saved host's DNS name",
+                    );
+                }
+            }
+            _ => {}
+        }
     }
 
     fn argument_constraints(&self, arguments: &mut ArgumentMetadata) {
@@ -662,7 +717,7 @@ static COMMANDS: &[CommandMeta] = &[
         "fjx auth status",
         [],
         "fjx auth status --json",
-        &["kind", "host", "user", "source"],
+        &["kind", "host", "user", "source", "ssh_aliases"],
         false,
         false
     ),
@@ -691,6 +746,24 @@ static COMMANDS: &[CommandMeta] = &[
         "fjx auth git-credential get",
         &[],
         false,
+        false
+    ),
+    command!(
+        "auth add-ssh-alias",
+        "fjx auth add-ssh-alias ALIAS --host URL",
+        [],
+        "fjx auth add-ssh-alias forge-ssh --host https://forge.example",
+        SSH_ALIAS_RESULT,
+        true,
+        false
+    ),
+    command!(
+        "auth remove-ssh-alias",
+        "fjx auth remove-ssh-alias ALIAS --host URL",
+        [],
+        "fjx auth remove-ssh-alias forge-ssh --host https://forge.example",
+        SSH_ALIAS_RESULT,
+        true,
         false
     ),
     command!(
@@ -736,7 +809,11 @@ static COMMANDS: &[CommandMeta] = &[
     command!(
         "issue create",
         "fjx issue create --title TEXT",
-        [BODY, METADATA],
+        [
+            BODY,
+            METADATA,
+            "--board TITLE | --board-id ID (Gitea: add a card in the board's default column)"
+        ],
         "fjx issue create --title 'Fix crash' --label bug --dry-run",
         ISSUE,
         true,
@@ -784,6 +861,42 @@ static COMMANDS: &[CommandMeta] = &[
         [],
         "fjx issue reopen 12",
         ISSUE,
+        true,
+        false
+    ),
+    command!(
+        "board list",
+        "fjx board list",
+        [PAGING, "--state open|closed|all (default open)"],
+        "fjx board list -R owner/repo --json",
+        BOARD,
+        false,
+        false
+    ),
+    command!(
+        "board view",
+        "fjx board view",
+        [BOARD_FLAG],
+        "fjx board view --json --fields title,cards",
+        BOARD_COLUMN,
+        false,
+        false
+    ),
+    command!(
+        "board move",
+        "fjx board move NUMBER COLUMN",
+        [BOARD_FLAG],
+        "fjx board move 12 'In Progress' --dry-run",
+        BOARD_RESULT,
+        true,
+        false
+    ),
+    command!(
+        "board remove",
+        "fjx board remove NUMBER",
+        [BOARD_FLAG],
+        "fjx board remove 12 --dry-run",
+        BOARD_RESULT,
         true,
         false
     ),
@@ -1164,6 +1277,7 @@ const GROUPS: &[&str] = &[
     "auth",
     "repo",
     "issue",
+    "board",
     "pr",
     "run",
     "release",
@@ -1238,6 +1352,20 @@ fn organization_help(name: &str, text: &mut String) {
     }
 }
 
+fn board_help(name: &str, text: &mut String) {
+    if name.starts_with("board ") {
+        text.push_str("Boards are Gitea repository projects. Forgejo has no project-board API: board commands exit 7 there without writing.\n");
+    }
+    match name {
+        "board view" => text.push_str("Lists columns in board order; each column's cards are {number, state, title, pull_request, html_url}. Plain output is one `column ID TITLE COUNT` line per column, followed by its `card COLUMN NUMBER STATE TITLE` lines.\n"),
+        "board move" => text.push_str("NUMBER is an issue or pull-request number. COLUMN is a column title, matched exactly and then ignoring case; --board matches a board title the same way. An issue without a card is added to the board; a card already on it moves. Reads the board, its columns and the issue first, including in dry runs.\n"),
+        "board remove" => text.push_str("Removes the card and keeps the issue; board move adds it again. Reads each column to find the card, including in dry runs.\n"),
+        "issue create" => text.push_str("--board and --board-id resolve the board before creating the issue and send its ID as projects. A forge without that field would ignore it, so fjx refuses a forge without a board API. Place the card with board move.\n"),
+        "auth add-ssh-alias" => text.push_str("Makes repository remotes whose SSH host is ALIAS (for example a Host entry in ~/.ssh/config) resolve to the saved login for --host. Remotes that name the host's own DNS name need no alias. The alias is saved with the login, kept across auth login, and removed by auth logout; auth status --json lists it. The remote's repository path is used as given.\n"),
+        _ => {}
+    }
+}
+
 pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
     let commands = select(path)?;
     let mut text = String::new();
@@ -1247,7 +1375,7 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
             env!("CARGO_PKG_VERSION"),
             " - a small Forgejo client\n"
         ));
-        text.push_str("\nUsage: fjx COMMAND [ACTION] [OPTIONS]\nCommands: auth, repo, org, team, issue, pr, run, release, label, milestone, branch, workflow, webhook, mcp\n  fjx api PATH\n  fjx help [COMMAND [ACTION]]\n  fjx schema [COMMAND [ACTION]] --json\n  fjx --version\n\nExit codes: 0 success, 1 unsuccessful work, 2 usage, 3 context/auth,\n4 network/TLS/timeout, 5 Forgejo HTTP, 6 safety, 7 incompatible data,\n8 local file/VCS, 130 interrupted\n");
+        text.push_str("\nUsage: fjx COMMAND [ACTION] [OPTIONS]\nCommands: auth, repo, org, team, issue, board, pr, run, release, label, milestone, branch, workflow, webhook, mcp\n  fjx api PATH\n  fjx help [COMMAND [ACTION]]\n  fjx schema [COMMAND [ACTION]] --json\n  fjx --version\n\nExit codes: 0 success, 1 unsuccessful work, 2 usage, 3 context/auth,\n4 network/TLS/timeout, 5 Forgejo HTTP, 6 safety, 7 incompatible data,\n8 local file/VCS, 130 interrupted\n");
     } else if commands.len() == 1 && !(path.len() == 1 && GROUPS.contains(&path[0].as_str())) {
         let command = commands[0];
         writeln!(text, "Usage: {}", command.usage).map_err(format_error)?;
@@ -1282,6 +1410,7 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
                 .map_err(format_error)?;
         }
         organization_help(command.name, &mut text);
+        board_help(command.name, &mut text);
         if command.name == "api" {
             text.push_str("Safety: raw DELETE requires --yes; writes are never retried. Raw API output has no typed field schema.\n");
         }
@@ -1358,7 +1487,10 @@ pub(crate) fn output_fields(command: &crate::args::Command) -> Option<&'static [
         Command::AuthStatus => ("auth", "status"),
         Command::AuthLogout => ("auth", "logout"),
         Command::AuthSetupGit => ("auth", "setup-git"),
+        Command::AuthSshAlias { remove: true, .. } => ("auth", "remove-ssh-alias"),
+        Command::AuthSshAlias { .. } => ("auth", "add-ssh-alias"),
         Command::RepoView => ("repo", "view"),
+        Command::Board(args) => ("board", args.action()),
         Command::Org(args) => ("org", args.action()),
         Command::Team(args) => ("team", args.action()),
         Command::Issue(args) => (

@@ -1,5 +1,6 @@
 pub(crate) mod api;
 pub(crate) mod auth;
+pub(crate) mod board;
 pub(crate) mod branch;
 pub(crate) mod issue;
 pub(crate) mod label;

@@ -24,6 +24,16 @@ struct AuthRecord<'a> {
     host: &'a str,
     user: &'a str,
     source: &'a str,
+    ssh_aliases: &'a [String],
+}
+
+#[derive(Serialize)]
+struct AliasRecord<'a> {
+    kind: &'static str,
+    action: &'static str,
+    ok: bool,
+    host: &'a str,
+    ssh_alias: &'a str,
 }
 
 #[derive(Serialize)]
@@ -427,6 +437,7 @@ pub(crate) fn status(args: &Args) -> Result<Outcome, Error> {
             host: context.host.as_str(),
             user: &user.login,
             source: source.as_str(),
+            ssh_aliases: context.config.ssh_aliases(&context.host),
         })
     } else {
         Ok(Outcome::text(format!(
@@ -448,6 +459,53 @@ pub(crate) fn logout(args: &Args) -> Result<Outcome, Error> {
     context.config.logout(&context.host);
     context.config.save(config_path(&context)?)?;
     result(args.json, "auth.logout")
+}
+
+/// Record or forget an SSH host name that stands for a saved login, for
+/// remotes whose SSH host is an alias from the user's SSH configuration.
+pub(crate) fn ssh_alias(args: &Args, alias: &str, remove: bool) -> Result<Outcome, Error> {
+    require_persistence()?;
+    reject_auth_flags(args)?;
+    let action = if remove {
+        "auth.remove-ssh-alias"
+    } else {
+        "auth.add-ssh-alias"
+    };
+    // The remote is what needs the alias, so it cannot also choose the host,
+    // and a default host would attach the alias to whichever login came last.
+    let host = args
+        .host
+        .clone()
+        .or_else(|| {
+            std::env::var("FJX_HOST")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .ok_or_else(|| Error::usage("SSH alias commands require --host URL or FJX_HOST"))?;
+    let host = crate::host::Host::parse(&host)?;
+    let path = config::path()?;
+    let _lock = config::auth_lock(&path)?;
+    let mut config = Config::load(&path)?;
+    let alias = if remove {
+        config.remove_ssh_alias(&host, alias)?
+    } else {
+        config.add_ssh_alias(&host, alias)?
+    };
+    config.save(&path)?;
+    if args.json {
+        Outcome::json(&AliasRecord {
+            kind: "result",
+            action,
+            ok: true,
+            host: host.as_str(),
+            ssh_alias: &alias,
+        })
+    } else {
+        Ok(Outcome::text(format!(
+            "{action}\t{alias}\t{}\tok\n",
+            host.as_str()
+        )))
+    }
 }
 
 fn config_path(context: &Context) -> Result<&std::path::Path, Error> {

@@ -7,6 +7,7 @@ redirects. Version 0.4.0 targets Forgejo 15.0.7.
 - View repositories; manage organizations, teams, issues, pull requests, and reviews.
 - Inspect action runs and dispatch workflows.
 - Publish releases and assets; manage labels, milestones, and branches.
+- Show Gitea project boards and move issue cards between columns by number and title.
 - Use readable views, stable tab-separated output, or compact JSON with selected fields.
 - Preview writes with `--dry-run`, or use `api` for other Forgejo endpoints.
 
@@ -128,6 +129,7 @@ Saved logins work on Unix and native Windows.
 fjx auth login --host https://forgejo.example
 fjx auth status --json
 fjx auth setup-git --host https://forgejo.example
+fjx auth add-ssh-alias forge-ssh --host https://forgejo.example
 fjx repo view -R owner/repo
 fjx issue list -R owner/repo --all --json --fields number,title,state
 fjx issue list -R owner/repo --label bug --assignee @me --search timeout
@@ -137,6 +139,9 @@ fjx issue edit -R owner/repo 12 --add-label bug --add-assignee @me --dry-run
 fjx help issue create
 fjx schema pr review --json
 fjx issue create -R owner/repo --title "Bug" --body-file report.md
+fjx board view -R owner/repo
+fjx board move -R owner/repo 12 "In Progress"
+fjx board remove -R owner/repo 12 --dry-run
 fjx pr create -R owner/repo --head feature --title "Change"
 fjx pr checks -R owner/repo 12 --json
 fjx run watch -R owner/repo 42 --poll 5 --wait 600
@@ -320,6 +325,42 @@ are escaped as described below. `fjx schema org --json` and
 public membership visibility, org repository creation, hooks, secrets, and
 runner administration remain available through `fjx api`.
 
+## Project boards
+
+Board commands drive Gitea repository projects and were checked against Gitea
+28.2.0. Forgejo 17 has no project API: there, each board command and
+`issue create --board` exits 7 and explains why, before any write.
+
+```sh
+fjx board list --state all --json
+fjx board view
+fjx board view --json --fields title,cards
+fjx board move 12 "In Progress"
+fjx board remove 12 --dry-run
+fjx issue create --title "Bug" --board Development
+```
+
+A repository's only open board is used by default. With none or several open,
+pass `--board TITLE` or `--board-id ID`; `board list` shows both. Board and
+column titles match exactly first, then ignoring case, and must match one
+board or column. A numeric title is never read as an ID.
+
+`board view` reports the columns in board order and the cards in each. JSON is
+an array of columns, `{kind, board, id, title, default, cards}`, whose cards are
+`{number, state, title, pull_request, html_url}`. Plain output has one
+`column`, ID, title, card count line per column, followed by one `card`, column
+title, number, state, title line per card.
+
+`board move NUMBER COLUMN` takes an issue or pull-request number and a column
+title. It adds a card for an issue that is not on the board and moves a card that
+is; the forge places it in the column by its own ordering. `board remove NUMBER`
+deletes the card and keeps the issue. Both read the board first, including during
+`--dry-run`: `move` reads the columns and the issue, `remove` reads each column
+to find the card. Each sends one write, never retried, and neither accepts
+`--yes`. `issue create --board` adds the new issue to the board's default
+column in the create request. Creating, renaming and reordering columns, and
+organization and user boards, remain available through `fjx api`.
+
 ## Configuration and safety
 
 Repository webhooks let Forgejo notify automation services when code, issues,
@@ -354,6 +395,18 @@ they do not run a receiver or grant bots permission to merge.
 
 Common flags may go before or after command words: `--host URL`, `-R OWNER/REPO`, `--json`, `--dry-run`, and `--yes`. `FJX_HOST`, `FJX_REPO`, `FJX_TOKEN`, and `FORGEJO_TOKEN` provide non-interactive context. `FJX_CONFIG` selects the token store.
 
+Without `--host` or `FJX_HOST`, the host comes from the repository's remote. An
+SSH remote selects the saved login whose DNS name is the remote's SSH host. When
+that host is an alias from your SSH configuration, such as
+`ssh://git@forge-ssh:2222/owner/repo.git`, record it once on the login it stands
+for: `fjx auth add-ssh-alias forge-ssh --host https://forgejo.example`. An alias
+needs an existing saved login, names one host, applies only to SSH remotes, and
+cannot be another saved host's DNS name, so a remote cannot send a token to a
+host you did not log in to. `auth status --json` lists a host's aliases,
+`auth remove-ssh-alias` forgets one, and `auth logout` removes them with the
+login. Versions before the alias commands ignore the field and drop it when they
+rewrite the token file.
+
 `auth login` uses browser OAuth in a terminal, defaulting to the pre-registered
 `git-credential-oauth` application for new logins. Pass `--client-id ID` or set
 `FJX_CLIENT_ID` to override it; the ID is remembered with a successful OAuth login.
@@ -373,7 +426,7 @@ Tokens never appear in command arguments or user-facing output. The client accep
 
 Raw `api` paths sit below the selected host's `/api/v1/` path. They must stay relative. Raw DELETE requires `--yes`. Write requests accept `--dry-run`, which prints the planned request without sending it.
 
-Typed commands cover the organization and team workflows above; issue list, view, create, edit, comments, comment, close, and reopen; pull-request list, view, create, edit, files, comments, reviews, review-comments, request-review, diff, checks, comment, review, merge, close, and reopen; action-run list, view, and watch; release list, view, create, and upload; label list and create; milestone list and create; branch list and delete; and workflow dispatch. Lists default to 30 open items where state applies. `--all` follows Forgejo pages up to 1,000 items and fails instead of returning a cut-off list. Forgejo 15.0.7 has no draft field in its create-pull request body, so `pr create --draft` uses its default `WIP:` title prefix in the one create request. `pr create` without `--base` reads the repository's default branch, including during dry-run, and sends it as `base`. API errors include Forgejo's response `message`, truncated and escaped like plain output.
+Typed commands cover the organization and team workflows above; issue list, view, create, edit, comments, comment, close, and reopen; board list, view, move, and remove; pull-request list, view, create, edit, files, comments, reviews, review-comments, request-review, diff, checks, comment, review, merge, close, and reopen; action-run list, view, and watch; release list, view, create, and upload; label list and create; milestone list and create; branch list and delete; and workflow dispatch. Lists default to 30 open items where state applies. `--all` follows Forgejo pages up to 1,000 items and fails instead of returning a cut-off list. Forgejo 15.0.7 has no draft field in its create-pull request body, so `pr create --draft` uses its default `WIP:` title prefix in the one create request. `pr create` without `--base` reads the repository's default branch, including during dry-run, and sends it as `base`. API errors include Forgejo's response `message`, truncated and escaped like plain output.
 
 `release view` identifies a release by tag. `release upload` instead requires the positive numeric Forgejo release ID returned by release list, view, or create; a tag is not accepted in that position. Uploads stream a regular file as `application/octet-stream`, default the asset name to the file name, and let `--name` override it. Workflow dispatch requires a workflow file and ref, accepts repeated unique `--field KEY=VALUE` inputs, and returns the created run ID, run number, and jobs.
 

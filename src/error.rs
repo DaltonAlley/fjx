@@ -4,6 +4,7 @@ use std::fmt::{self, Display, Formatter};
 pub(crate) struct Error {
     code: u8,
     message: String,
+    status: Option<u16>,
 }
 
 impl Error {
@@ -21,6 +22,19 @@ impl Error {
 
     pub(crate) fn api(message: impl Into<String>) -> Self {
         Self::new(5, message)
+    }
+
+    /// An API error that keeps the response status, so a command can explain
+    /// a missing route without parsing the message.
+    pub(crate) fn http(status: u16, message: impl Into<String>) -> Self {
+        Self {
+            status: Some(status),
+            ..Self::api(message)
+        }
+    }
+
+    pub(crate) const fn http_status(&self) -> Option<u16> {
+        self.status
     }
 
     pub(crate) fn safety(message: impl Into<String>) -> Self {
@@ -43,6 +57,7 @@ impl Error {
         Self {
             code,
             message: message.into(),
+            status: None,
         }
     }
 }

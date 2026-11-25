@@ -126,7 +126,7 @@ fjx board remove 42
 fjx issue create --title "Timeout during sync" --board Development --dry-run
 ```
 
-Boards are Gitea repository projects; Forgejo has no project API, and board
+Boards are Gitea repository projects; Forgejo 17 has no project API, and board
 commands exit 7 there before writing. The forge's card routes take an issue's
 forge-wide ID and a column ID. fjx resolves both from the issue number and the
 column title, so `board move` reads the board, its columns and the issue, then

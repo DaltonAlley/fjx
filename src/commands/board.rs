@@ -373,14 +373,14 @@ fn cards(repo: &RepoClient, board: u64, column: u64) -> Result<Vec<CardResponse>
 
 /// Every board command reads the board list or a board first. When that route
 /// answers 404 for a repository that exists, the forge does not serve it:
-/// Forgejo has no project-board API. That is an incompatible forge, not a
+/// Forgejo through version 17 has no project-board API. That is an incompatible forge, not a
 /// missing record, and it is reported before any write.
 fn missing_api(repo: &RepoClient, error: Error) -> Error {
     if error.http_status() != Some(404) || repo.get::<Value>(&repo.root(), "repository").is_err() {
         return error;
     }
     Error::data(format!(
-        "{} has no project-board API for {}: the board route returned HTTP 404 for a repository that exists. Forgejo does not provide this API; on Gitea, check that projects are enabled for the repository",
+        "{} has no project-board API for {}: the board route returned HTTP 404 for a repository that exists. Forgejo through version 17 does not provide this API; on Gitea, check that projects are enabled for the repository",
         repo.client.host().as_str(),
         repo.name()
     ))

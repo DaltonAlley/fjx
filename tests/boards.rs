@@ -706,7 +706,10 @@ fn focused_help_and_schema_describe_board_commands_without_context() {
         assert!(output.status.success(), "{words:?}");
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(text.contains(command["usage"].as_str().unwrap_or_default()));
-        assert!(text.contains("Forgejo has no project-board API"), "{text}");
+        assert!(
+            text.contains("Forgejo through version 17 has no project-board API"),
+            "{text}"
+        );
     }
     let moving = &commands[2];
     assert_eq!(

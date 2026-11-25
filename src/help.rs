@@ -1354,7 +1354,7 @@ fn organization_help(name: &str, text: &mut String) {
 
 fn board_help(name: &str, text: &mut String) {
     if name.starts_with("board ") {
-        text.push_str("Boards are Gitea repository projects. Forgejo has no project-board API: board commands exit 7 there without writing.\n");
+        text.push_str("Boards are Gitea repository projects. Forgejo through version 17 has no project-board API: board commands exit 7 there without writing.\n");
     }
     match name {
         "board view" => text.push_str("Lists columns in board order; each column's cards are {number, state, title, pull_request, html_url}. Plain output is one `column ID TITLE COUNT` line per column, followed by its `card COLUMN NUMBER STATE TITLE` lines.\n"),

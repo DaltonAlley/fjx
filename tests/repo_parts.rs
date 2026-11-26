@@ -63,6 +63,10 @@ impl Server {
             while !thread_stop.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // Accepted sockets can inherit nonblocking mode on Windows.
+                        stream
+                            .set_nonblocking(false)
+                            .unwrap_or_else(|error| panic!("{error}"));
                         let request = read_request(&mut stream);
                         thread_requests
                             .lock()

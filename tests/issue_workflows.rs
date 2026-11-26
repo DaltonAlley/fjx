@@ -29,6 +29,10 @@ fn run(args: &[&str], responses: Vec<(u16, Value, Option<usize>)>) -> (Output, V
                     Err(error) => panic!("{error}"),
                 }
             };
+            // Accepted sockets can inherit nonblocking mode on Windows.
+            stream
+                .set_nonblocking(false)
+                .unwrap_or_else(|error| panic!("{error:?}"));
             stream
                 .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                 .unwrap_or_else(|error| panic!("{error:?}"));

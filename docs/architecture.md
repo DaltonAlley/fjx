@@ -12,7 +12,7 @@ results, and redacts active HTTP credentials before serializing either result
 format. A thread-local HTTP control limits each request and checks cancellation
 between requests; an in-flight blocking request finishes within its timeout.
 Repository activity is a partial pull feed, not a webhook receiver or bot wakeup
-mechanism. See the [MCP setup and limits](../README.md#mcp-for-local-agents).
+mechanism. See the [MCP setup and limits](cli-workflows.md#mcp-for-local-agents).
 
 ## Module ownership
 
@@ -105,7 +105,7 @@ is checked against FIPS digest vectors and the RFC 7636 S256 example.
   access removals, and raw DELETE need explicit confirmation.
 - Pagination and run watching accumulate a final result before returning output.
 - Plain fields have reversible control-character escaping. JSON retains original
-  values. See [README output contracts](../README.md#output-contracts).
+  values. See [output contracts](cli-workflows.md#output-contracts).
 - Unsafe Rust is denied except in `config/windows.rs` and `oauth/windows.rs`.
   Their documented Windows API calls use owned handles, aligned buffers, or a
   fixed-size writable RNG buffer. There is no public library API.
@@ -119,3 +119,11 @@ including redaction, host boundaries, pagination failures, and terminal input.
 `tests/release.nu` exercises version transactions and packaging/publication
 helpers using fixtures and simulated tools. Passing those tests does not mean a
 binary has been published or validated on native Windows or macOS hardware.
+
+The stateful journeys in `tests/e2e_journeys.rs` cover saved-login issue management,
+lost write responses, pagination failure and recovery, and checks followed by a
+PR head change before a guarded merge. They assert server state across separate
+CLI processes, output and exit codes, and absence of duplicate writes. Each CLI
+process has a ten-second deadline; fixture socket operations have two-second
+deadlines. Run just these journeys with `cargo test --locked --test e2e_journeys`.
+They run automatically in the existing PR/main gate and Windows test job.

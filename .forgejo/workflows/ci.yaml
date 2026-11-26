@@ -84,3 +84,31 @@ jobs:
           FORGEJO_REPOSITORY: ${{ forgejo.repository }}
           CHECKOUT_SHA: ${{ forgejo.sha }}
         run: nu --no-config-file scripts/forgejo-ci.nu publish "$CHECKOUT_SHA"
+
+  # Forgejo starts no workflow for events made by the job token, so the
+  # release event never runs github-mirror.yaml. Copy the release here, right
+  # after it is final. github-mirror.yaml stays as the backup (main pushes,
+  # schedule, manual dispatch). Both use the one-slot fjx-release runner.
+  github-mirror:
+    name: Copy releases to GitHub
+    needs: release
+    runs-on: fjx-release
+    timeout-minutes: 20
+    steps:
+      - name: Check out the released commit
+        env:
+          CHECKOUT_URL: ${{ forgejo.server_url }}/${{ forgejo.repository }}.git
+          CHECKOUT_SHA: ${{ forgejo.sha }}
+        run: |
+          set -eu
+          git init .
+          git remote add origin "$CHECKOUT_URL"
+          git fetch --no-tags origin "$CHECKOUT_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
+
+      - name: Copy and verify all published Forgejo releases
+        env:
+          FORGEJO_TOKEN: ${{ forgejo.token }}
+          GH_RELEASE_MIRROR_TOKEN: ${{ secrets.GH_RELEASE_MIRROR_TOKEN }}
+        run: nu --no-config-file scripts/github-mirror.nu

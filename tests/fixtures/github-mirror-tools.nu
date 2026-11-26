@@ -10,6 +10,14 @@ def respond [args: list<string>, status: string, body: any] {
 
 export def fake-git [args: list<string>] {
   let tag = $args | last | str replace '^{}' ''
+  # FAKE_TAG_LATE=N: the native push mirror sends the tag to GitHub only after
+  # N GitHub tag lookups.
+  if ($args | str join ' ' | str contains github.com) and ($env.FAKE_TAG_LATE? | default '') != '' {
+    let counter = $env.FAKE_MIRROR_STATE | path join tag-lookups
+    let seen = if ($counter | path exists) { open --raw $counter | into int } else { 0 }
+    ($seen + 1 | into string) | save --force --raw $counter
+    if $seen < ($env.FAKE_TAG_LATE | into int) { return }
+  }
   let hash = if ($env.FAKE_TAG_MISMATCH? | default '') == 'true' and ($args | str join ' ' | str contains github.com) { 'bbbb' } else { 'aaaa' }
   print $"($hash)\t($tag)"
 }

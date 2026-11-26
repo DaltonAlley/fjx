@@ -98,8 +98,19 @@ def test-forgejo-ci-contract [] {
     check ($step.env.FORGEJO_EVENT_NAME == '${{ forgejo.event_name }}' and $step.env.FORGEJO_REF == '${{ forgejo.ref }}') 'publication context guards must receive the actual workflow event'
   }
   check ($workflow.concurrency.cancel-in-progress == "${{ forgejo.ref != 'refs/heads/main' }}") 'main publication must not be canceled by later pushes'
+  # Forgejo starts no workflow for release events made by the job token, so
+  # the release run copies the release to GitHub itself, once it is final.
+  let mirror = $workflow.jobs.github-mirror
+  check ($mirror.needs == release) 'GitHub copy must wait for the final Forgejo release'
+  check (($mirror.if? | default '') == '') 'GitHub copy must run only when the release job succeeds'
+  check ($mirror.runs-on == fjx-release and $mirror.timeout-minutes == 20) 'GitHub copy must use the bounded release runner'
+  check (not ($mirror.steps.0 | to json | str contains 'secrets.')) 'checkout must not consume the GitHub credential'
+  let copier = $mirror.steps | last
+  check ($copier.env.GH_RELEASE_MIRROR_TOKEN == '${{ secrets.GH_RELEASE_MIRROR_TOKEN }}') 'GitHub credential must be scoped to the copy step'
+  check ($copier.run == 'nu --no-config-file scripts/github-mirror.nu') 'release run must use the tested copier'
+  let other_jobs = $workflow.jobs | reject github-mirror | to json
+  check (not ($other_jobs | str contains 'secrets.')) 'build, test and publication jobs must not require repository secrets'
   let text = open --raw .forgejo/workflows/ci.yaml
-  check (not ($text | str contains 'secrets.')) 'Forgejo CI must not require repository PAT secrets'
   check (not ($text | str contains 'apt-get')) 'tool installation must stay outside PR jobs'
 }
 

@@ -100,10 +100,9 @@ def "main publish" [revision: string] {
   publication-state $revision $epoch | ignore
   build-assets $revision
   let plan = publication-state $revision $epoch
-  if $plan.needs_tag {
-    checked git [-c 'user.name=Forgejo Actions' -c 'user.email=actions@localhost' tag --annotate $plan.tag --message $"fjx v($plan.version)" $revision]
-    checked $nu.current-exe [--no-config-file $release_script push-tag $plan.tag $revision]
-  }
+  # Create the draft and its assets before the tag exists. Forgejo publishes a
+  # draft as soon as it syncs a pushed tag with the same name, so publish-release
+  # pushes the tag only after every remote byte matches the local build.
   let release_id = if $plan.needs_release {
     create-release $plan.version $plan.tag | into string
   } else { $plan.release_id }
@@ -111,6 +110,10 @@ def "main publish" [revision: string] {
     checked $nu.current-exe [--no-config-file $release_script upload-missing-assets $release_id $plan.missing_assets]
   }
   if $plan.needs_publication {
+    let local_tag = do { ^git rev-parse --quiet --verify $"refs/tags/($plan.tag)" } | complete
+    if $plan.needs_tag and $local_tag.exit_code != 0 {
+      checked git [-c 'user.name=Forgejo Actions' -c 'user.email=actions@localhost' tag --annotate $plan.tag --message $"fjx v($plan.version)" $revision]
+    }
     checked $nu.current-exe [--no-config-file $release_script publish-release $plan.version $revision $plan.tag]
   }
   checked $nu.current-exe [--no-config-file $release_script verify-final $plan.version $revision $plan.tag]

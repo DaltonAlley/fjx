@@ -108,9 +108,21 @@ def tag-refs [url: string, tag: string] {
   $result.stdout | lines | sort
 }
 
-def verify-tag [tag: string] {
+def verify-tag [tag: string, --wait] {
   let expected = tag-refs $"($source)/($source_repo).git" $tag
-  let actual = tag-refs $"https://github.com/($destination).git" $tag
+  mut actual = tag-refs $"https://github.com/($destination).git" $tag
+  # Right after a release, the native push mirror may not have sent the new
+  # tag yet. Wait a bounded time for a missing tag (read-only). A different
+  # tag hash still fails at once.
+  if $wait and ($expected | is-not-empty) and ($actual | is-empty) {
+    let limit = $env.FJX_MIRROR_TAG_WAIT_SECONDS? | default '300' | into int | into duration --unit sec
+    let step = [$limit 10sec] | math min
+    let deadline = (date now) + $limit
+    while ($actual | is-empty) and (date now) < $deadline {
+      sleep $step
+      $actual = tag-refs $"https://github.com/($destination).git" $tag
+    }
+  }
   if ($expected | is-empty) or $actual != $expected {
     fail 'release tag hashes differ; rerun after the native code mirror succeeds (tags are never created or moved here)'
   }
@@ -162,7 +174,7 @@ def inventory [assets: list] {
 def sync-one [source_release: record, directory: path] {
   let identity = release-identity $source_release
   validate-assets $source_release.assets $identity.tag_name
-  verify-tag $identity.tag_name
+  verify-tag $identity.tag_name --wait
   let assets_directory = $directory | path join source-assets
   let downloads = $directory | path join github-assets
   mkdir $assets_directory $downloads

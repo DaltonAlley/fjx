@@ -410,10 +410,12 @@ export def publication-state [expected_revision: string, source_date_epoch: stri
   mut missing_assets = []
   match $request.status {
     "200" => {
-      if $needs_tag { rm --force $request.response; fail $"($tag) has a Forgejo release but no verifiable remote tag; refusing ambiguous repair" }
       let release = try { open --raw $request.response | from json } catch { rm --force $request.response; fail "Forgejo returned an invalid release record" }
       if ($release.tag_name? | default "") != $tag or (($release.id? | describe) !~ '^int') or $release.id <= 0 { rm --force $request.response; fail "Forgejo returned an invalid release identity" }
-      if ($release.draft? | describe) != bool { fail 'Forgejo release has no draft state' }
+      if ($release.draft? | describe) != bool { rm --force $request.response; fail 'Forgejo release has no draft state' }
+      # The tag is pushed only after the draft is verified, so a draft without
+      # a tag is an interrupted run. A public release without one is not.
+      if $needs_tag and not $release.draft { rm --force $request.response; fail $"($tag) has a public Forgejo release but no verifiable remote tag; refusing ambiguous repair" }
       validate-release $release $version $tag --draft=$release.draft
       $needs_publication = $release.draft
       $release_id = $release.id | into string
@@ -471,7 +473,7 @@ def "main upload-missing-assets" [release_id: int, names: string] {
   }
 }
 
-def "main push-tag" [tag: string, revision: string] {
+export def push-tag [tag: string, revision: string] {
   let tag_object = do { ^git cat-file -t $"refs/tags/($tag)" } | complete
   let peeled = do { ^git rev-parse $"refs/tags/($tag)^{}" } | complete
   if $tag_object.exit_code != 0 or ($tag_object.stdout | str trim) != "tag" or $peeled.exit_code != 0 or ($peeled.stdout | str trim) != $revision {
@@ -482,9 +484,11 @@ def "main push-tag" [tag: string, revision: string] {
   if $pushed.exit_code != 0 { fail "authenticated release tag push failed" }
 }
 
-def verified-release [version: string, revision: string, tag: string, --draft] {
+def "main push-tag" [tag: string, revision: string] { push-tag $tag $revision }
+
+def verified-release [version: string, revision: string, tag: string, --draft, --allow-missing-tag] {
   if $version != (validate-versions) or $tag != $"fjx/v($version)" { fail "final release identity does not match project version" }
-  if (inspect-remote-tags $tag $revision $version) { fail "final release tag is missing" }
+  if (inspect-remote-tags $tag $revision $version) and not $allow_missing_tag { fail "final release tag is missing" }
   let request = release-api GET $"releases/tags/($tag | str replace --all '/' '%2F')"
   if $request.status != "200" { rm --force $request.response; fail "final Forgejo release is missing" }
   let release = try { open --raw $request.response | from json } catch { rm --force $request.response; fail "final Forgejo release is invalid JSON" }
@@ -503,8 +507,12 @@ def "main verify-final" [version: string, revision: string, tag: string] {
 
 # The only transition to a public release: all remote bytes must first match
 # the complete locally checked set. An ambiguous PATCH stops; reruns read state.
+# Forgejo also publishes a draft when its tag is pushed (a queued tag sync sets
+# draft=false seconds later). So the tag is pushed only here, after the bytes
+# are verified and right before the PATCH. Either one may publish first.
 def "main publish-release" [version: string, revision: string, tag: string] {
-  let release = verified-release $version $revision $tag --draft
+  let release = verified-release $version $revision $tag --draft --allow-missing-tag
+  if (inspect-remote-tags $tag $revision $version) { push-tag $tag $revision }
   let request = release-api PATCH $"releases/($release.id)" --body {draft: false}
   if $request.status != '200' {
     rm --force $request.response

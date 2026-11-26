@@ -182,7 +182,9 @@ fn wait_for_code(
                     break;
                 }
                 let limit = remaining.min(Duration::from_secs(2));
-                if stream.set_read_timeout(Some(limit)).is_err()
+                // Accepted sockets can inherit nonblocking mode on Windows.
+                if stream.set_nonblocking(false).is_err()
+                    || stream.set_read_timeout(Some(limit)).is_err()
                     || stream.set_write_timeout(Some(limit)).is_err()
                 {
                     continue;

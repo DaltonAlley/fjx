@@ -104,6 +104,8 @@ fn server(responses: Vec<(u16, String)>) -> (String, thread::JoinHandle<Vec<Stri
                     Err(error) => panic!("fixture accept failed: {error}"),
                 }
             };
+            // Accepted sockets can inherit nonblocking mode on Windows.
+            stream.set_nonblocking(false).expect("blocking stream");
             requests.push(request(&mut stream));
             if requests
                 .last()

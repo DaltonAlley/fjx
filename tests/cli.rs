@@ -273,7 +273,7 @@ fn windows_login_saves_a_token_that_later_commands_use() {
     assert_eq!(
         String::from_utf8_lossy(&status.stdout),
         format!(
-            "{{\"kind\":\"auth\",\"host\":\"{host}\",\"user\":\"dalton\",\"source\":\"config\"}}\n"
+            "{{\"kind\":\"auth\",\"host\":\"{host}\",\"user\":\"dalton\",\"source\":\"config\",\"ssh_aliases\":[]}}\n"
         )
     );
     let requests = server.join().unwrap_or_else(|_| panic!("server panicked"));

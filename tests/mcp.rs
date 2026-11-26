@@ -126,6 +126,10 @@ fn fixture(responses: Vec<(&'static str, u16, String)>) -> (String, std::thread:
                     Err(e) => panic!("accept: {e}"),
                 }
             };
+            // Accepted sockets can inherit nonblocking mode on Windows.
+            stream
+                .set_nonblocking(false)
+                .unwrap_or_else(|e| panic!("blocking: {e}"));
             stream
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap_or_else(|e| panic!("timeout: {e}"));

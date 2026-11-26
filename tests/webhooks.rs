@@ -43,6 +43,10 @@ impl Mock {
             while !stopped.load(Ordering::Relaxed) && Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // Accepted sockets can inherit nonblocking mode on Windows.
+                        stream
+                            .set_nonblocking(false)
+                            .unwrap_or_else(|error| panic!("{error}"));
                         stream
                             .set_read_timeout(Some(Duration::from_secs(2)))
                             .unwrap_or_else(|error| panic!("{error}"));

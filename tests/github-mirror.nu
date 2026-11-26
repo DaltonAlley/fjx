@@ -48,6 +48,7 @@ def main [] {
       FAKE_MIRROR_STATE: $root
       GH_RELEASE_MIRROR_TOKEN: github-fixture-secret
       FORGEJO_TOKEN: forgejo-fixture-secret
+      FJX_MIRROR_TAG_WAIT_SECONDS: '2'
     } {
       $release | update draft true | to json | save --force $source
       let skipped = run
@@ -57,6 +58,10 @@ def main [] {
       check ((run).exit_code != 0 and (writes $root | is-empty)) 'incomplete source release must fail before writes'
       $release | to json | save --force $source
       check ((run {FAKE_TAG_MISMATCH: 'true'}).exit_code != 0 and (writes $root | is-empty)) 'mismatched tags must stop copying'
+      let started = date now
+      check ((run {FAKE_TAG_LATE: '1000'}).exit_code != 0 and (writes $root | is-empty)) 'a tag that never reaches GitHub must fail before writes'
+      check (((date now) - $started) >= 2sec) 'a missing GitHub tag must be waited for before failing'
+      rm --force ($root | path join tag-lookups)
       let bad = $release | update assets {|r| $r.assets | update 0 {|a| $a | update browser_download_url 'https://evil.example/asset' } }
       $bad | to json | save --force $source
       check ((run).exit_code != 0 and (writes $root | is-empty)) 'foreign source asset URL must fail before writes'
@@ -72,8 +77,10 @@ def main [] {
       check ((open $state).draft and ((open $state).assets | length) == 1) 'lost response must preserve the partial draft'
       check ((writes $root | length) == 2) 'ambiguous upload must not be retried in the same run'
       '' | save --force ($root | path join calls)
-      let recovered = run {FAKE_PAGINATE: 'true'}
+      # The release job copies right after publishing; the tag may arrive late.
+      let recovered = run {FAKE_PAGINATE: 'true', FAKE_TAG_LATE: '1'}
       check ($recovered.exit_code == 0) $recovered.stderr
+      check ((open --raw ($root | path join tag-lookups) | into int) >= 2) 'late GitHub tag was not looked up again'
       let published = open $state
       check (not $published.draft and ($published.assets | length) == 12 and $published.body == $release.body) 'rerun must finish and publish the same release'
       check ((writes $root | where method == POST | length) == 11) 'rerun uploaded an existing asset again'

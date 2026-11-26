@@ -17,6 +17,11 @@ export def fake-git [args: list<string>] {
     let revision = ^$env.FAKE_REAL_GIT rev-parse $"($reference)^{}" | str trim
     $"($object) ($reference)\n($revision) ($reference)^{}\n" | save --force --raw $tag
     log push-tag
+    # Forgejo syncs pushed tags in a queue. The sync publishes any draft with
+    # that tag name. In v0.4.0 and v0.5.0 it ran 2-3 s after the push, once the
+    # draft existed. Model that: it runs on the first API call after a release
+    # exists. FAKE_TAG_SYNC=never models a queue slower than the job.
+    if ($env.FAKE_TAG_SYNC? | default queued) != never { touch ($env.FAKE_STATE | path join pending-tag-sync) }
     return
   }
   ^$env.FAKE_REAL_GIT ...$args
@@ -58,12 +63,28 @@ def argument [args: list<string>, flag: string] {
   $args | get ($index + 1)
 }
 
+# Log every draft-to-public change with the asset count at that moment.
+def make-public [record: path] {
+  let release = open $record
+  if $release.draft { log public ($release.assets | length | into string) }
+  $release | update draft false | to json | save --force --raw $record
+}
+
+def run-tag-sync [record: path] {
+  let pending = $env.FAKE_STATE | path join pending-tag-sync
+  if not ($pending | path exists) or not ($record | path exists) { return }
+  rm $pending
+  log tag-sync
+  make-public $record
+}
+
 export def fake-curl [args: list<string>] {
   let output = argument $args '--output'
   let method = argument $args '--request'
   let url = $args | last
   let record = $env.FAKE_STATE | path join release.json
   let assets = $env.FAKE_STATE | path join assets
+  run-tag-sync $record
   log $method $url
   if $url =~ '/releases/download/' {
     let name = $url | path basename
@@ -98,7 +119,7 @@ export def fake-curl [args: list<string>] {
   if $method == PATCH {
     let body = open --raw (argument $args '--data-binary' | str substring 1..) | from json
     if $body != {draft: false} { error make {msg: 'unexpected publication request'} }
-    open $record | update draft false | to json | save --force --raw $record
+    make-public $record
     cp --force $record $output
     print --no-newline (if ($env.FAKE_AMBIGUOUS_PUBLISH? | default '') == 'true' { 503 } else { 200 })
     return

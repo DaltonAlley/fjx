@@ -154,6 +154,8 @@ def test-orchestration [] {
       check (($preparation | where event == build | length) == 6) 'writes began before all targets built'
       check (($preparation | where event == format-check | length) == 6) 'writes began before local archive verification'
       check (($upload_calls | where event == PATCH | is-empty)) 'failed upload published a partial release'
+      # Forgejo publishes a draft when it syncs a pushed tag of the same name.
+      check (($upload_calls | where event == push-tag | is-empty)) 'tag was pushed before the draft was complete and verified'
       check (($upload_calls | where event == POST | where {|call| $call.value | str ends-with $failed_asset } | length) == 1) 'failed upload was retried blindly'
 
       fresh-checkout $project
@@ -162,6 +164,7 @@ def test-orchestration [] {
       check ($corrupt.exit_code != 0) 'mismatched remote bytes must stop publication'
       check ((open ($state | path join release.json)).draft) 'corrupt download published a release'
       check ((calls $state | where event == PATCH | is-empty)) 'corrupt assets reached the public transition'
+      check ((calls $state | where event == push-tag | is-empty)) 'corrupt assets reached the tag push that publishes a draft'
       check ((calls $state | where event == POST | length) == 11) 'retry must upload only the missing assets'
 
       fresh-checkout $project
@@ -173,6 +176,9 @@ def test-orchestration [] {
       check (($attempts | where event == PATCH | length) == 1) 'publication write was retried'
       let publication = $attempts | enumerate | where {|row| $row.item.event == PATCH } | first | get index
       check (($attempts | take $publication | where event == download | get value | uniq | length) == 12) 'publication preceded complete remote byte verification'
+      let tag_push = $attempts | enumerate | where {|row| $row.item.event == push-tag } | first | get index
+      check (($attempts | take $tag_push | where event == download | get value | uniq | length) == 12) 'tag push preceded complete remote byte verification'
+      check (($attempts | where event == public | get value) == ['12']) 'release must become public once, with all twelve assets'
 
       fresh-checkout $project
       '' | save --force --raw ($state | path join calls)
@@ -190,18 +196,29 @@ def test-orchestration [] {
       check ((run-ci $project [publish $revision]).exit_code != 0) 'partial public release must be rejected'
       check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag] }) 'partial public release was modified'
 
-      # Also exercise a normal, unambiguous publication from an empty server.
-      rm --force ($state | path join release.json) ($state | path join tag)
-      rm --recursive ($state | path join assets)
-      mkdir ($state | path join assets)
-      git tag --delete fjx/v1.2.10 | ignore
-      '' | save --force --raw ($state | path join calls)
-      let success = run-ci $project [publish $revision]
-      check ($success.exit_code == 0) $success.stderr
-      check (not (open ($state | path join release.json)).draft) 'successful run left a draft'
-      check ((calls $state | where event == POST | length) == 13) 'new release must create one draft and twelve attachments'
-      check ((calls $state | where event == PATCH | length) == 1) 'successful run must publish once'
-      check ((calls $state | where event == download | length) == 24) 'successful run must verify all bytes before and after publication'
+      # Also exercise a normal, unambiguous publication from an empty server,
+      # with Forgejo's tag sync publishing the draft (queued) or not (never).
+      # Before the fix, the queued sync published the draft while assets were
+      # still uploading and publish-release failed with 'metadata is not exact'.
+      for sync in [queued never] {
+        rm --force ($state | path join release.json) ($state | path join tag) ($state | path join pending-tag-sync)
+        rm --recursive ($state | path join assets)
+        mkdir ($state | path join assets)
+        do { ^$real_git tag --delete fjx/v1.2.10 } | complete | ignore
+        fresh-checkout $project
+        '' | save --force --raw ($state | path join calls)
+        let success = run-ci $project [publish $revision] {FAKE_TAG_SYNC: $sync}
+        check ($success.exit_code == 0) $"($sync) tag sync: ($success.stderr)"
+        let events = calls $state
+        check (not (open ($state | path join release.json)).draft) 'successful run left a draft'
+        check (($events | where event == POST | length) == 13) 'new release must create one draft and twelve attachments'
+        check (($events | where event == PATCH | length) == 1) 'successful run must publish once'
+        check (($events | where event == download | length) == 24) 'successful run must verify all bytes before and after publication'
+        check (($events | where event == public | get value) == ['12']) $"($sync) tag sync: release must become public once, with all twelve assets"
+        check (($events | where event == tag-sync | length) == (if $sync == queued { 1 } else { 0 })) 'tag sync model did not run as configured'
+        let tag_push = $events | enumerate | where {|row| $row.item.event == push-tag } | first | get index
+        check (($events | take $tag_push | where event == download | length) == 12) 'tag push must follow complete draft verification'
+      }
     }
   } catch {|error|
     cd ($root | path dirname)

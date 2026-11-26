@@ -29,12 +29,14 @@ x86-64 Linux binaries with `--version`. ARM64 Linux, Windows, and macOS receive
 static format validation in this workflow; the optional full local smoke
 pipeline below is separate.
 
-Only after local verification does the job create the annotated `fjx/vVERSION`
-tag and a **draft** Forgejo release and upload the twelve archive/checksum assets.
-It downloads every attachment and compares its bytes to the verified local file
-before making the release public. It then verifies the public release again.
+Only after local verification does the job create a **draft** Forgejo release
+and upload the twelve archive/checksum assets. It downloads every attachment
+and compares its bytes to the verified local file. Only then does it push the
+annotated `fjx/vVERSION` tag and make the release public. The tag comes last
+because Forgejo publishes a draft as soon as it syncs a pushed tag with the
+same name. The job then verifies the public release again.
 The built-in repository job token supplies authentication; no PAT secret is
-needed. Build/test subprocesses do not inherit that token. Main runs are
+needed for publication. Build/test subprocesses do not inherit that token. Main runs are
 serialized and are not canceled by later pushes.
 
 If publication fails, inspect the tag, release, and asset state before rerunning
@@ -165,10 +167,15 @@ changes on Forgejo. Before activation, the old GitHub branches and annotated
 release tags were preserved on Forgejo, including the former GitHub main under
 `archive/github/main-20261115`. A verified Git bundle also preserves the old refs.
 
-[Release mirroring](../.forgejo/workflows/github-mirror.yaml) listens for
-published/edited releases and main pushes, and reconciles every six hours at
-00:23, 06:23, 12:23 and 18:23 UTC. It always runs the script from trusted main,
-uses the existing `fjx-release` runner, and serializes runs without cancellation.
+The release run copies a new release to GitHub in its **Copy releases to
+GitHub** job, right after the Forgejo release is final. Forgejo starts no
+workflow for events made by the job token, so the release event alone does
+not start a copy. [Release mirroring](../.forgejo/workflows/github-mirror.yaml)
+is the backup: it listens for published/edited releases and main pushes, and
+reconciles every six hours at 00:23, 06:23, 12:23 and 18:23 UTC. It always runs
+the script from trusted main, uses the existing `fjx-release` runner, and
+serializes runs without cancellation. If a new tag has not reached GitHub yet,
+the copier waits up to five minutes for it.
 This consumes the existing version-bump publisher's public releases, without
 rebuilding binaries. The separate `GH_RELEASE_MIRROR_TOKEN` Actions secret is
 only supplied to the copy step. A repository-scoped GitHub token needs Contents

@@ -461,6 +461,7 @@ pub(crate) struct ApiArgs {
     pub(crate) method: Option<String>,
     pub(crate) input: Option<OsString>,
     pub(crate) paginate: bool,
+    pub(crate) include: bool,
 }
 
 #[derive(Debug, Default)]
@@ -530,6 +531,7 @@ struct Specific {
     method: Option<String>,
     input: Option<OsString>,
     paginate: bool,
+    include: bool,
     state: Option<String>,
     page: Option<String>,
     all: bool,
@@ -622,6 +624,7 @@ fn parse_parser(mut parser: lexopt::Parser) -> Result<Args, Error> {
             Short('X') => set_once(&mut specific.method, string_value(&mut parser, "-X")?, "-X")?,
             Long("input") => set_once(&mut specific.input, os_value(&mut parser)?, "--input")?,
             Long("paginate") => set_switch(&mut specific.paginate, "--paginate")?,
+            Long("include") => set_switch(&mut specific.include, "--include")?,
             Long("state") => set_once(
                 &mut specific.state,
                 string_value(&mut parser, "--state")?,
@@ -1101,6 +1104,7 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
             method: o.method.take(),
             input: o.input.take(),
             paginate: std::mem::take(&mut o.paginate),
+            include: std::mem::take(&mut o.include),
         })),
         _ => {
             let mut hint = String::from("fjx");
@@ -1617,6 +1621,7 @@ impl Specific {
             (self.method.is_some(), "-X"),
             (self.input.is_some(), "--input"),
             (self.paginate, "--paginate"),
+            (self.include, "--include"),
             (self.state.is_some(), "--state"),
             (self.page.is_some(), "--page"),
             (self.all, "--all"),
@@ -1820,6 +1825,7 @@ fn consume_help_flags(path: &[String], o: &mut Specific) -> Result<(), Error> {
         o.method.take();
         o.input.take();
         o.paginate = false;
+        o.include = false;
     }
     if group == "auth" && command == "login" {
         o.with_token = false;

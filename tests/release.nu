@@ -6,8 +6,6 @@ use ../scripts/release-smoke.nu [run-arm64-smoke-container]
 
 const release_script = path self ../scripts/release.nu
 const package_script = path self ../scripts/package-release.nu
-const release_smoke_script = path self ../scripts/release-smoke.nu
-const ci_release_script = path self ../scripts/ci-release.nu
 const release_toml = path self ../release.toml
 const release_targets = path self ../release-targets.toml
 const release_containerfile = path self ../packaging/release.Containerfile
@@ -622,55 +620,32 @@ def test-release-build-contract [] {
 
   # Workflow policy belongs to the standalone repository's CI tests. Keep
   # release tests focused on the local packaging and publication contracts.
-  let driver = (open --raw $ci_release_script)
-  for required in [
-    'package-release.nu) build $asset_dir --runtime $runtime --source-date-epoch'
-    'verify-assets $asset_dir $version --source-date-epoch ($source_date_epoch | into int) --runtime=$runtime --wine=$wine --smoke'
-    'Wine is required to smoke the Windows release target'
-  ] {
-    check ($driver | str contains $required) $"six-target release driver lacks: ($required)"
-  }
-  let asset_verifications = $driver
-    | lines
-    | where {|line| $line | str trim | str starts-with 'verify-assets ' }
-  check (($asset_verifications | length) == 1) "release driver must verify exported assets exactly once"
-  check ((($asset_verifications | first) | str trim) == 'verify-assets $asset_dir $version --source-date-epoch ($source_date_epoch | into int) --runtime=$runtime --wine=$wine --smoke') "release driver must smoke the complete six-target asset set"
   let release_driver = open --raw $release_script
   for required in ['def "main push-tag"' '^git remote get-url origin' "GIT_CONFIG_KEY_1: 'http.followRedirects'" 'git cat-file -t' 'Forgejo token is required to push a release tag' 'def "main upload-missing-assets"' 'def "main verify-final"' 'must be greater than prior released version' 'browser_download_url' 'releases/download/($tag)/($name)' "--proto '=https' --max-redirs 0" 'does not match the locally checked output' 'draft: false' 'prerelease: false'] {
     check ($release_driver | str contains $required) $"release publication boundary lacks: ($required)"
   }
-  let version = (open --raw $release_toml | from toml | get version)
-  let wrong_version = (do { ^nu --no-config-file $ci_release_script build-package-smoke 0.0.0 123 } | complete)
-  check ($wrong_version.exit_code != 0) "release driver accepted the wrong version"
-  let bad_epoch = (do { ^nu --no-config-file $ci_release_script build-package-smoke $version invalid } | complete)
-  check ($bad_epoch.exit_code != 0) "release driver accepted an invalid source date epoch"
 }
 
-def test-ci-build-arguments [] {
-  let version = (open --raw $release_toml | from toml | get version)
-  let root = (fixture $version)
-  let project = ($root | path join fjx)
-  let scripts = ($project | path join scripts)
-  mkdir $scripts
-  cp $ci_release_script $package_script $release_script $release_smoke_script $scripts
-  cp $release_targets ($project | path join release-targets.toml)
-
+def test-build-retry-and-arguments [] {
+  let root = (^mktemp -d | str trim)
+  let project = ($package_script | path dirname | path dirname)
+  let output = ($root | path join assets)
   let log = ($root | path join runtime.jsonl)
   let runtime = (fake-build-runtime $root argument-logger.nu $log)
 
-  let result = with-env {RELEASE_WORKSPACE_ROOT: $root, FAKE_BUILD_LOG: $log, FAKE_BUILD_FAIL_TARGET: x86_64-pc-windows-gnu} {
-    do { ^nu --no-config-file ($scripts | path join ci-release.nu) build-package-smoke $version 1 --runtime $runtime } | complete
+  let result = with-env {FAKE_BUILD_LOG: $log, FAKE_BUILD_FAIL_TARGET: x86_64-pc-windows-gnu} {
+    do { ^nu --no-config-file $package_script build $output --runtime $runtime --source-date-epoch 1 } | complete
   }
-  check ($result.exit_code != 0) "release driver unexpectedly continued after the injected final-target build failure"
+  check ($result.exit_code != 0) "release build unexpectedly continued after the injected final-target build failure"
 
   let calls = open --raw $log | lines | each { from json }
-  check (($calls | length) == 7) "release driver did not retry the injected final-target build failure exactly once"
-  check (($calls | each {|arguments| $arguments | take 2 } | all {|prefix| $prefix == [buildx build] })) "release driver did not invoke Docker-compatible Buildx for every target"
+  check (($calls | length) == 7) "release build did not retry the injected final-target build failure exactly once"
+  check (($calls | each {|arguments| $arguments | take 2 } | all {|prefix| $prefix == [buildx build] })) "release build did not invoke Docker-compatible Buildx for every target"
   let build_targets = ($calls | each {|arguments|
     $arguments | where {|argument| $argument | str starts-with 'TARGET=' } | first | str replace 'TARGET=' ''
   })
-  check (($build_targets | drop 1) == (release-targets | get triple)) "release driver build order diverges from the authoritative target manifest"
-  check (($build_targets | last 2) == [x86_64-pc-windows-gnu x86_64-pc-windows-gnu]) "release driver retried the wrong target"
+  check (($build_targets | drop 1) == (release-targets | get triple)) "release build order diverges from the authoritative target manifest"
+  check (($build_targets | last 2) == [x86_64-pc-windows-gnu x86_64-pc-windows-gnu]) "release build retried the wrong target"
   check (($calls | all {|arguments| ($arguments | last) == $project })) "project build context did not reach every target build boundary"
   check (($calls | all {|arguments| 'SOURCE_DATE_EPOCH=1' in $arguments })) "source date epoch did not reach every target build"
   rm -rf $root
@@ -691,5 +666,5 @@ test-release-metadata-mutations
 test-authenticated-release-origin
 test-create-release
 test-release-build-contract
-test-ci-build-arguments
+test-build-retry-and-arguments
 print 'fjx release tests passed'

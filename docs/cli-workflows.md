@@ -271,7 +271,8 @@ cannot be another saved host's DNS name, so a remote cannot send a token to a
 host you did not log in to. `auth status --json` lists a host's aliases,
 `auth remove-ssh-alias` forgets one, and `auth logout` removes them with the
 login. Versions before the alias commands ignore the field and drop it when they
-rewrite the token file.
+rewrite the token file. Versions after 0.5.2 keep every token file field they
+do not know, at the top level and for each host, when they rewrite the file.
 
 `auth list` shows every saved login with its host, user, default flag and SSH
 aliases. It reads only the token file: it makes no request, checks no token and

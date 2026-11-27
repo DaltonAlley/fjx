@@ -146,3 +146,35 @@ fn rejects_scoping_flags_and_unsafe_token_files() {
     assert_eq!(output.status.code(), Some(3));
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn token_file_rewrites_keep_fields_from_other_builds() {
+    let root = Root::new();
+    root.write_config(&json!({
+        "version": 1,
+        "default_host": "https://a.example",
+        "future_top": {"keep": true},
+        "hosts": {"https://a.example": {"user": "u", "token": "a-secret", "future_host": [1]}},
+    }));
+    let output = root.run(&[
+        "auth",
+        "add-ssh-alias",
+        "a-ssh",
+        "--host",
+        "https://a.example",
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let saved: Value =
+        serde_json::from_slice(&fs::read(root.config()).unwrap_or_else(|error| panic!("{error}")))
+            .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(saved["future_top"], json!({"keep": true}));
+    let entry = &saved["hosts"]["https://a.example"];
+    assert_eq!(entry["future_host"], json!([1]));
+    assert_eq!(entry["ssh_aliases"], json!(["a-ssh"]));
+    assert_eq!(entry["token"], "a-secret");
+}

@@ -49,13 +49,21 @@ export def fake-cargo [args: list<string>] {
     aarch64-apple-darwin => 'Mach-O 64-bit arm64 executable'
     x86_64-pc-windows-gnu => 'PE32+ executable MS Windows x86-64'
   }
-  $"#!/usr/bin/env bash\n# format: ($description)\nprintf 'fjx ($version)\\n'\n" | save --force --raw $binary
+  let script = $"#!/usr/bin/env bash\n# format: ($description)\nprintf 'fjx ($version)\\n'\n"
+  if $target.os == windows {
+    # Like the real linker: the PE timestamp is SOURCE_DATE_EPOCH, else now.
+    # FAKE_UNPINNED_LINK models a linker that ignores SOURCE_DATE_EPOCH.
+    let pinned = if ($env.FAKE_UNPINNED_LINK? | default '') == 'true' { null } else { $env.SOURCE_DATE_EPOCH? }
+    let stamp = $pinned | default (date now | format date '%s') | into int
+    let header = 0x[4D 5A] | bytes add --end (0..57 | each { 0x[00] } | bytes collect) | bytes add --end 0x[40 00 00 00 50 45 00 00 64 86 06 00]
+    $header | bytes add --end ($stamp | into binary | bytes at 0..<4) | bytes add --end ($"\n($script)" | into binary) | save --force --raw $binary
+  } else { $script | save --force --raw $binary }
   ^chmod 755 $binary
 }
 
 export def fake-file [args: list<string>] {
   log format-check
-  open --raw ($args | last) | lines | where {|line| $line | str starts-with '# format: ' } | first | str replace '# format: ' '' | print
+  ^grep --text '^# format: ' ($args | last) | lines | first | str replace '# format: ' '' | print
 }
 
 def argument [args: list<string>, flag: string] {

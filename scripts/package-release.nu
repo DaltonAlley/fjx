@@ -129,7 +129,19 @@ def smoke-linux-arm64 [binary: path, platform: string, container_runtime: string
   rm -rf $qemu_root
 }
 
-def verify-one [asset_dir: path, version: string, target: record, container_runtime: string, wine: string, smoke: bool] {
+# Reads the COFF TimeDateStamp: 4 bytes at e_lfanew + 8, little-endian.
+export def pe-timestamp [binary: path] {
+  let bytes = open --raw $binary | into binary
+  let size = $bytes | length
+  if $size < 64 or ($bytes | bytes at 0..<2) != 0x[4D 5A] { fail $"($binary | path basename) has no MZ header" }
+  let offset = $bytes | bytes at 60..<64 | into int --endian little
+  if $size < ($offset + 12) or ($bytes | bytes at $offset..<($offset + 4)) != 0x[50 45 00 00] {
+    fail $"($binary | path basename) has no PE header"
+  }
+  $bytes | bytes at ($offset + 8)..<($offset + 12) | into int --endian little
+}
+
+def verify-one [asset_dir: path, version: string, target: record, container_runtime: string, wine: string, smoke: bool, epoch: int] {
   let archive = (archive-name $version $target)
   let archive_path = ($asset_dir | path join $archive)
   let checksum_path = ($asset_dir | path join $"($archive).sha256")
@@ -145,7 +157,11 @@ def verify-one [asset_dir: path, version: string, target: record, container_runt
     let binary = ($stage | path join $target.executable)
     let description = (^file --brief $binary | str trim)
     if not ($description =~ $target.file_pattern) { fail $"wrong executable format for ($target.triple): ($description)" }
-    if $target.os != windows {
+    if $target.os == windows {
+      # A build without SOURCE_DATE_EPOCH holds the link time instead.
+      let stamp = pe-timestamp $binary
+      if $stamp != $epoch { fail $"PE timestamp ($stamp) of ($target.triple) does not match the source date epoch ($epoch)" }
+    } else {
       let mode = (^stat -c '%A' $binary | str trim)
       if not ($mode | str contains 'x') { fail $"archive binary is not executable for ($target.triple)" }
     }
@@ -163,15 +179,18 @@ def verify-one [asset_dir: path, version: string, target: record, container_runt
   rm -rf $stage
 }
 
-export def verify-assets [asset_dir: path, version: string, --runtime: string = docker, --wine: string = '', --smoke] {
+export def verify-assets [asset_dir: path, version: string, --source-date-epoch: int, --runtime: string = docker, --wine: string = '', --smoke] {
   let targets = (release-targets)
   if $smoke and ($wine | is-empty) and ($targets | any {|target| $target.runtime == wine }) {
     fail "--wine is required for smoke verification because the release matrix contains a Wine target"
   }
+  if $source_date_epoch == null and ($targets | any {|target| $target.os == windows }) {
+    fail "--source-date-epoch is required to check the Windows PE timestamp"
+  }
   let expected = ($targets | each {|target| let archive = (archive-name $version $target); [$archive $"($archive).sha256"] } | flatten | sort)
   let actual = (ls $asset_dir | where type == file | get name | each {|file| $file | path basename } | sort)
   if $actual != $expected { fail $"release asset inventory mismatch; expected ($expected | str join ', '); found ($actual | str join ', ')" }
-  for target in $targets { verify-one $asset_dir $version $target $runtime $wine $smoke }
+  for target in $targets { verify-one $asset_dir $version $target $runtime $wine $smoke ($source_date_epoch | default 0) }
 }
 
 export def flatten-assets [platform_dir: path, asset_dir: path] {
@@ -185,10 +204,10 @@ export def flatten-assets [platform_dir: path, asset_dir: path] {
   }
 }
 
-def build-target [runtime: string, project_dir: path, raw_root: path, target: record] {
+def build-target [runtime: string, project_dir: path, raw_root: path, target: record, epoch: int] {
   let destination = ($raw_root | path join $target.triple)
   mkdir $destination
-  let arguments = [--file ($project_dir | path join packaging release.Containerfile) --build-arg $"TARGET=($target.triple)" --build-arg $"EXECUTABLE=($target.executable)" --output $"type=local,dest=($destination)" $project_dir]
+  let arguments = [--file ($project_dir | path join packaging release.Containerfile) --build-arg $"TARGET=($target.triple)" --build-arg $"EXECUTABLE=($target.executable)" --build-arg $"SOURCE_DATE_EPOCH=($epoch)" --output $"type=local,dest=($destination)" $project_dir]
   for attempt in 1..2 {
     let result = if ($runtime | path basename) == podman {
       do { ^$runtime build ...$arguments } | complete
@@ -221,7 +240,7 @@ def package [output_dir: path, target_name: string, epoch: int, build_runtime: s
         $env.FJX_PACKAGE_BIN_ROOT
       } else {
         if ($build_runtime | is-empty) { fail "a build runtime is required when FJX_PACKAGE_BIN_ROOT is unset" }
-        build-target $build_runtime $project_dir $raw_root $target
+        build-target $build_runtime $project_dir $raw_root $target $epoch
         $raw_root
       }
       package-seeded ($source_root | path join $target.triple $target.executable) $output_dir $version $target $stage_root $epoch
@@ -244,8 +263,8 @@ def "main build" [output_dir: path, --runtime: string = docker, --source-date-ep
 
 def "main flatten" [platform_dir: path, asset_dir: path] { flatten-assets $platform_dir $asset_dir }
 
-def "main verify" [asset_dir: path, version: string, --runtime: string = docker, --wine: string = '', --smoke] {
-  verify-assets $asset_dir $version --runtime=$runtime --wine=$wine --smoke=$smoke
+def "main verify" [asset_dir: path, version: string, --source-date-epoch: int, --runtime: string = docker, --wine: string = '', --smoke] {
+  verify-assets $asset_dir $version --source-date-epoch=$source_date_epoch --runtime=$runtime --wine=$wine --smoke=$smoke
 }
 
 def "main matrix" [] { release-targets | to json }

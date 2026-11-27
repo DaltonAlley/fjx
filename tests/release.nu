@@ -1,7 +1,7 @@
 #!/usr/bin/env nu
 
 use ../scripts/release.nu [publication-plan create-release]
-use ../scripts/package-release.nu [release-targets]
+use ../scripts/package-release.nu [release-targets pe-timestamp]
 use ../scripts/release-smoke.nu [run-arm64-smoke-container]
 
 const release_script = path self ../scripts/release.nu
@@ -318,7 +318,7 @@ def test-build-runtime-command-shapes [] {
 def test-smoke-requires-wine [] {
   let assets = (^mktemp -d | str trim)
   let version = (open --raw $release_toml | from toml | get version)
-  let missing_wine = (do { ^nu --no-config-file $package_script verify $assets $version --smoke } | complete)
+  let missing_wine = (do { ^nu --no-config-file $package_script verify $assets $version --source-date-epoch 1700000000 --smoke } | complete)
   check ($missing_wine.exit_code != 0) "smoke verification silently skipped the Wine target"
   check ($missing_wine.stderr | str contains '--wine is required') "missing-Wine failure omitted its reason"
   check (not ($missing_wine.stderr | str contains 'release asset inventory mismatch')) "missing-Wine validation ran after asset verification"
@@ -330,19 +330,38 @@ def test-default-runtime-and-asset-checks [] {
   let assets = (^mktemp -d | str trim)
   with-env {FJX_PACKAGE_BIN_ROOT: $bins} { ^nu --no-config-file $package_script $assets all }
   let version = (open --raw $release_toml | from toml | get version)
-  let wrong_format = (do { ^nu --no-config-file $package_script verify $assets $version } | complete)
+  let no_epoch = (do { ^nu --no-config-file $package_script verify $assets $version } | complete)
+  check ($no_epoch.exit_code != 0 and ($no_epoch.stderr | str contains '--source-date-epoch is required')) "verification ran without a PE timestamp to check"
+  let wrong_format = (do { ^nu --no-config-file $package_script verify $assets $version --source-date-epoch 1700000000 } | complete)
   check ($wrong_format.exit_code != 0) "target-aware executable validation accepted scripts"
   check ($wrong_format.stderr | str contains 'wrong executable format') "format failure omitted its reason"
   touch ($assets | path join unexpected.txt)
-  let extra = (do { ^nu --no-config-file $package_script verify $assets $version } | complete)
+  let extra = (do { ^nu --no-config-file $package_script verify $assets $version --source-date-epoch 1700000000 } | complete)
   check ($extra.exit_code != 0) "extra release asset passed"
   check ($extra.stderr | str contains 'release asset inventory mismatch') "extra-asset failure omitted the inventory mismatch"
   check ($extra.stderr | str contains 'unexpected.txt') "extra-asset failure omitted the inventory"
   rm ($assets | path join unexpected.txt)
   'bad' | save --append --raw ($assets | path join $"fjx-($version)-x86_64-unknown-linux-gnu.tar.gz")
-  let bad = (do { ^nu --no-config-file $package_script verify $assets $version } | complete)
+  let bad = (do { ^nu --no-config-file $package_script verify $assets $version --source-date-epoch 1700000000 } | complete)
   check ($bad.exit_code != 0) "bad asset checksum passed"
   rm -rf $bins $assets
+}
+
+def pe-file [path: path, stamp: int] {
+  let header = 0x[4D 5A] | bytes add --end (0..57 | each { 0x[00] } | bytes collect) | bytes add --end 0x[40 00 00 00 50 45 00 00 64 86 06 00]
+  $header | bytes add --end ($stamp | into binary | bytes at 0..<4) | save --force --raw $path
+}
+
+def test-pe-timestamp [] {
+  let root = (^mktemp -d | str trim)
+  let file = $root | path join fjx.exe
+  pe-file $file 1795738652
+  check ((pe-timestamp $file) == 1795738652) "PE timestamp was not read from e_lfanew + 8"
+  0x[4D 5A 00 00] | save --force --raw $file
+  check (try { pe-timestamp $file | ignore; false } catch { true }) "truncated PE header passed"
+  '#!/usr/bin/env nu' | save --force --raw $file
+  check (try { pe-timestamp $file | ignore; false } catch { true }) "script without MZ header passed"
+  rm -rf $root
 }
 
 def test-publish-planning [] {
@@ -595,6 +614,7 @@ def test-release-build-contract [] {
   check (not ($containerfile | str contains 'cargo install --list')) "unavailable Cargo install metadata probe returned"
   check (not ($containerfile | str contains 'cargo zigbuild --version')) "unsupported cargo-zigbuild version probe returned"
   check ($containerfile | str contains 'cargo zigbuild --locked --release --target "$TARGET"') "cross build does not honor its exact target"
+  check ($containerfile | str contains 'ARG SOURCE_DATE_EPOCH') "cross build does not pin the PE timestamp"
   check (not ($containerfile | str contains ':latest')) "release container retains a mutable latest tag"
   let package_script_text = (open --raw $package_script)
   check ($package_script_text | str contains "const linux_amd64_smoke_image = 'docker.io/library/debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171'") "AMD64 Linux smoke image is not digest-pinned"
@@ -605,7 +625,7 @@ def test-release-build-contract [] {
   let driver = (open --raw $ci_release_script)
   for required in [
     'package-release.nu) build $asset_dir --runtime $runtime --source-date-epoch'
-    'verify-assets $asset_dir $version --runtime=$runtime --wine=$wine --smoke'
+    'verify-assets $asset_dir $version --source-date-epoch ($source_date_epoch | into int) --runtime=$runtime --wine=$wine --smoke'
     'Wine is required to smoke the Windows release target'
   ] {
     check ($driver | str contains $required) $"six-target release driver lacks: ($required)"
@@ -614,7 +634,7 @@ def test-release-build-contract [] {
     | lines
     | where {|line| $line | str trim | str starts-with 'verify-assets ' }
   check (($asset_verifications | length) == 1) "release driver must verify exported assets exactly once"
-  check ((($asset_verifications | first) | str trim) == 'verify-assets $asset_dir $version --runtime=$runtime --wine=$wine --smoke') "release driver must smoke the complete six-target asset set"
+  check ((($asset_verifications | first) | str trim) == 'verify-assets $asset_dir $version --source-date-epoch ($source_date_epoch | into int) --runtime=$runtime --wine=$wine --smoke') "release driver must smoke the complete six-target asset set"
   let release_driver = open --raw $release_script
   for required in ['def "main push-tag"' '^git remote get-url origin' "GIT_CONFIG_KEY_1: 'http.followRedirects'" 'git cat-file -t' 'Forgejo token is required to push a release tag' 'def "main upload-missing-assets"' 'def "main verify-final"' 'must be greater than prior released version' 'browser_download_url' 'releases/download/($tag)/($name)' "--proto '=https' --max-redirs 0" 'does not match the locally checked output' 'draft: false' 'prerelease: false'] {
     check ($release_driver | str contains $required) $"release publication boundary lacks: ($required)"
@@ -652,6 +672,7 @@ def test-ci-build-arguments [] {
   check (($build_targets | drop 1) == (release-targets | get triple)) "release driver build order diverges from the authoritative target manifest"
   check (($build_targets | last 2) == [x86_64-pc-windows-gnu x86_64-pc-windows-gnu]) "release driver retried the wrong target"
   check (($calls | all {|arguments| ($arguments | last) == $project })) "project build context did not reach every target build boundary"
+  check (($calls | all {|arguments| 'SOURCE_DATE_EPOCH=1' in $arguments })) "source date epoch did not reach every target build"
   rm -rf $root
 }
 
@@ -664,6 +685,7 @@ test-default-runtime-and-asset-checks
 test-build-runtime-command-shapes
 test-arm64-smoke-state-machine
 test-smoke-requires-wine
+test-pe-timestamp
 test-publish-planning
 test-release-metadata-mutations
 test-authenticated-release-origin

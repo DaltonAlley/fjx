@@ -460,6 +460,7 @@ fn tool_args(name: &str, value: Value, host: &str) -> Result<Args, Error> {
             method: Some("GET".to_owned()),
             input: None,
             paginate: false,
+            include: false,
         }),
         _ => return Err(Error::usage("unknown tool")),
     };

@@ -1,4 +1,5 @@
-use std::io::Read;
+use std::fmt::Write as _;
+use std::io::{Read, Write as _};
 use std::time::Duration;
 
 use crate::config::Token;
@@ -120,6 +121,7 @@ pub(crate) struct Client {
     agent: ureq::Agent,
     host: Host,
     token: Token,
+    include: bool,
 }
 
 pub(crate) struct Response {
@@ -143,7 +145,18 @@ impl Client {
                 secrets.push(token.as_str().to_owned());
             }
         });
-        Self { agent, host, token }
+        Self {
+            agent,
+            host,
+            token,
+            include: false,
+        }
+    }
+
+    /// Write each response's status line and headers to stderr.
+    pub(crate) const fn with_include(mut self, include: bool) -> Self {
+        self.include = include;
+        self
     }
 
     pub(crate) fn host(&self) -> &Host {
@@ -203,6 +216,16 @@ impl Client {
     }
 
     fn response(&self, result: Result<ureq::Response, ureq::Error>) -> Result<Response, Error> {
+        if self.include
+            && let Ok(response) | Err(ureq::Error::Status(_, response)) = &result
+        {
+            // Written as each response arrives, so --paginate shows every
+            // page and an HTTP error still shows its headers. Stdout stays
+            // the body. A closed stderr must not fail the request.
+            let _ = std::io::stderr()
+                .lock()
+                .write_all(format_head(response).as_bytes());
+        }
         let response = match result {
             Ok(response) => response,
             Err(ureq::Error::Status(status, response)) => {
@@ -253,6 +276,31 @@ impl Client {
             total_count,
         })
     }
+}
+
+/// The status line and headers of one response, for `fjx api --include`.
+/// Every part uses the plain-output encoding, so a server cannot drive the
+/// terminal. Header names are lowercase, repeated headers keep one line per
+/// value, and Set-Cookie is dropped. A blank line ends the block.
+fn format_head(response: &ureq::Response) -> String {
+    let mut text = format!(
+        "{} {} {}\n",
+        plain_field(response.http_version()),
+        response.status(),
+        plain_field(response.status_text())
+    );
+    let mut seen: Vec<String> = Vec::new();
+    for name in response.headers_names() {
+        if name == "set-cookie" || seen.contains(&name) {
+            continue;
+        }
+        for value in response.all(&name) {
+            let _ = writeln!(text, "{}: {}", plain_field(&name), plain_field(value));
+        }
+        seen.push(name);
+    }
+    text.push('\n');
+    text
 }
 
 /// Extract Forgejo's JSON `message` from an error response. The read is bounded,

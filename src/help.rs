@@ -193,6 +193,7 @@ const SSH_ALIAS_RESULT: &[&str] = &["kind", "action", "ok", "host", "ssh_alias"]
 const BOARD_FLAG: &str =
     "--board TITLE | --board-id ID (default: the repository's only open board)";
 const CREATED_URL: &str = "plain output also writes the new URL alone on one stderr line after a successful create; --json and --dry-run keep stderr empty";
+const API_INCLUDE: &str = "--include writes each response's status line and headers to stderr as it arrives, then a blank line, including for HTTP errors and for every page with --paginate; names are lowercase, values use the plain-output encoding, Set-Cookie is dropped; --include is not valid with --dry-run";
 const PAGING: &str = "--page N (default 1), --all, --limit N (default 30)";
 const BODY: &str = "--body TEXT | --body-file PATH|-";
 const METADATA: &str = "--label NAME, --label-id ID, --assignee NAME (repeatable), --milestone NAME | --milestone-id ID";
@@ -461,6 +462,7 @@ impl CommandMeta {
                 arguments
                     .constraints
                     .push("--paginate requires GET; --dry-run requires a write method");
+                arguments.constraints.push(API_INCLUDE);
             }
             "issue list" | "pr list" => arguments
                 .constraints
@@ -1248,6 +1250,7 @@ static COMMANDS: &[CommandMeta] = &[
         [
             "-X GET|POST|PUT|PATCH|DELETE (default GET, POST with --input)",
             "--input PATH|-, --paginate (GET only)",
+            "--include (status line and headers on stderr; stdout stays the body)",
             "--dry-run (write only), --yes (DELETE only)"
         ],
         "fjx api /repos/owner/repo --json",
@@ -1428,6 +1431,7 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
         board_help(command.name, &mut text);
         if command.name == "api" {
             text.push_str("Safety: raw DELETE requires --yes; writes are never retried. Raw API output has no typed field schema.\n");
+            writeln!(text, "Headers: {API_INCLUDE}.").map_err(format_error)?;
         }
         if matches!(command.name, "webhook create" | "webhook edit") {
             text.push_str("Input: config {url, content_type: json, http_method: POST, secret}, events [names], active, branch_filter, authorization_header. Create defaults type to forgejo and active to true; config.url and nonempty events are required. Edit changes only supplied top-level fields; supplied config requires url. Other providers use fjx api.\nSafety: URLs, secrets and authorization headers are omitted from results and redacted in dry runs. Protect input files; prefer stdin from your secret store.\n");

@@ -67,6 +67,9 @@ pub(crate) fn run(common: &Args, args: &ApiArgs) -> Result<Outcome, Error> {
     if args.paginate && !matches!(method, Method::Get) {
         return Err(Error::usage("--paginate requires GET"));
     }
+    if common.dry_run && args.include {
+        return Err(Error::usage("--include is not valid with --dry-run"));
+    }
     if common.dry_run && !method.is_write() {
         return Err(Error::usage("--dry-run requires a write request"));
     }
@@ -81,7 +84,7 @@ pub(crate) fn run(common: &Args, args: &ApiArgs) -> Result<Outcome, Error> {
     let token = context
         .token
         .ok_or_else(|| Error::context("token is required"))?;
-    let client = Client::new(context.host, token);
+    let client = Client::new(context.host, token).with_include(args.include);
     if common.dry_run {
         let url = client.host().api_url(path.as_str());
         return dry_run(common.json, method, &url, body.as_ref());

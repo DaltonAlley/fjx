@@ -296,3 +296,21 @@ fn client_integration_commands_and_flags_are_documented() {
         );
     }
 }
+
+#[test]
+fn api_include_is_documented_in_help_and_schema() {
+    let api = schema(&["api"]);
+    assert!(
+        api["commands"][0]["flags"]
+            .to_string()
+            .contains("--include")
+    );
+    assert!(
+        api["commands"][0]["constraints"]
+            .to_string()
+            .contains("every page with --paginate")
+    );
+    let help = text(&["api"]);
+    assert!(help.contains("--include"));
+    assert!(help.contains("Set-Cookie is dropped"));
+}

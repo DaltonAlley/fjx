@@ -325,6 +325,7 @@ fjx webhook test -R owner/repo 1 --ref main
 fjx webhook delete -R owner/repo 1 --yes --dry-run
 fjx api /version --json
 fjx api /repos/owner/repo/issues --paginate --json
+fjx api /repos/owner/repo/issues --include --json
 ```
 
 ## Organizations and teams
@@ -462,7 +463,7 @@ Issue/PR metadata names may need paginated read requests, including during dry-r
 
 `fjx help COMMAND ACTION` and `fjx COMMAND ACTION --help` show focused help without repository or authentication context. `fjx schema COMMAND ACTION --json` exposes versioned command metadata for tooling. Use `--json --fields number,title,state` to select documented top-level fields without changing bare `--json`. Unknown or duplicate fields fail before any request or write. Projection preserves object/array shapes, null values, and exit codes. It reduces stdout, not the server response size. Issue/PR/run list filters execute on the server and are preserved across pages.
 
-`issue view --human` and `pr view --human` show readable multiline bodies and metadata. Existing plain and JSON defaults remain unchanged except for additive JSON metadata fields. Issue and PR JSON include normalized milestone metadata; PR JSON also distinguishes merged from closed and includes label/assignee names. Comment/review write results expose IDs where supplied by the server. Raw `api --json` emits `null` for a successful empty response. After a successful `issue create` or `pr create`, plain mode also writes the new URL alone on one stderr line, as `gh` does; stdout keeps the record, and `--json` keeps stderr empty.
+`issue view --human` and `pr view --human` show readable multiline bodies and metadata. Existing plain and JSON defaults remain unchanged except for additive JSON metadata fields. Issue and PR JSON include normalized milestone metadata; PR JSON also distinguishes merged from closed and includes label/assignee names. Comment/review write results expose IDs where supplied by the server. Raw `api --json` emits `null` for a successful empty response. `api --include` writes each response's status line and headers to stderr, one block per page with `--paginate`, and keeps stdout as the body; it escapes them like plain output and drops `Set-Cookie`. After a successful `issue create` or `pr create`, plain mode also writes the new URL alone on one stderr line, as `gh` does; stdout keeps the record, and `--json` keeps stderr empty.
 
 Plain output is stable and short. Each tab separates fields and each line feed ends a record. Within server-provided fields, backslash, tab, carriage return, and line feed encode as `\\`, `\t`, `\r`, and `\n`; every other Unicode control scalar encodes as `\u{HEX}` with uppercase hex and no leading zeroes. This encoding is reversible, so text that looks like an escape starts with `\\`. `--json` emits one compact JSON value with the original field values and no plain-output encoding. Errors go to stderr and leave stdout empty. See `fjx --help` for exit classes.
 

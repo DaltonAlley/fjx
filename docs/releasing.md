@@ -90,9 +90,8 @@ and the private registration is preserved. Image presence alone does not prove
 the runner is using it. The release slot remains one job, two CPUs, 4 GiB, and
 45 minutes. Job containers are unprivileged with no host mounts or socket.
 Runtime credentials stay in private `~/.local/state/fjx-runner/{ci,release}/.runner`
-files. No whole-system activation is needed. The legacy
-[ci/runner.nix](../ci/runner.nix) installer replaces both slots and does not
-provide image retention; use the separate maintained deployments on Dyad.
+files. No whole-system activation is needed. This repository has no runner
+installer; use the dalton/nixos deployments above.
 
 ## Prepare a version
 

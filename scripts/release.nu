@@ -412,6 +412,7 @@ def write-output [plan: record, output: path] {
     $"needs_release=($plan.needs_release? | default $plan.publish)"
     $"needs_assets=($plan.needs_assets? | default $plan.publish)"
     $"needs_publication=($plan.needs_publication? | default $plan.publish)"
+    $"replace_assets=($plan.replace_assets? | default false)"
     $"missing_assets=($plan.missing_assets? | default '')"
     $"release_id=($plan.release_id? | default '')"
     $"tag=($plan.tag)"
@@ -438,6 +439,7 @@ export def publication-state [expected_revision: string, source_date_epoch: stri
   mut needs_release = false
   mut needs_publication = true
   mut missing_assets = []
+  mut replace_assets = false
   match $request.status {
     "200" => {
       let release = try { open --raw $request.response | from json } catch { rm --force $request.response; fail "Forgejo returned an invalid release record" }
@@ -452,7 +454,11 @@ export def publication-state [expected_revision: string, source_date_epoch: stri
       let names = $release.assets? | default [] | each {|asset| $asset.name? | default "" }
       let expected = asset-names $version
       if ($names | uniq | length) != ($names | length) or ($names | any {|name| $name not-in $expected }) { rm --force $request.response; fail "release has duplicate or unexpected assets; refusing ambiguous repair" }
-      $missing_assets = $expected | where $it not-in $names
+      # The job token cannot read draft bytes, so assets from an earlier run
+      # cannot be checked. While the draft has no tag, replace them all. Once
+      # the tag exists, Forgejo may publish the draft at any moment, so keep them.
+      $replace_assets = $release.draft and $needs_tag and ($names | is-not-empty)
+      $missing_assets = if $replace_assets { $expected } else { $expected | where $it not-in $names }
       if not $release.draft and ($missing_assets | is-not-empty) {
         fail 'published release is incomplete; refusing to upload to a public release'
       }
@@ -465,7 +471,7 @@ export def publication-state [expected_revision: string, source_date_epoch: stri
   # can compare the remote bytes with output that passed the native checks.
   let needs_assets = true
   let complete = not ($needs_tag or $needs_release or $needs_assets)
-  let plan = {publish: (not $complete), needs_tag: $needs_tag, needs_release: $needs_release, needs_publication: $needs_publication, needs_assets: $needs_assets, missing_assets: ($missing_assets | str join ','), release_id: $release_id, tag: $tag, version: $version, source_date_epoch: $source_date_epoch}
+  let plan = {publish: (not $complete), needs_tag: $needs_tag, needs_release: $needs_release, needs_publication: $needs_publication, needs_assets: $needs_assets, replace_assets: $replace_assets, missing_assets: ($missing_assets | str join ','), release_id: $release_id, tag: $tag, version: $version, source_date_epoch: $source_date_epoch}
   $plan
 }
 
@@ -490,6 +496,42 @@ export def create-release [version: string, tag: string] {
   }
   $release.id
 }
+
+def draft-without-tag [release_id: int, revision: string] {
+  let version = validate-versions
+  let tag = $"fjx/v($version)"
+  # Pushing the tag publishes the draft, so a pushed tag stops all deletes.
+  if not (inspect-remote-tags $tag $revision $version) { fail $"($tag) is already pushed; refusing to delete release assets" }
+  let request = release-api GET $"releases/tags/($tag | str replace --all '/' '%2F')"
+  if $request.status != "200" { rm --force $request.response; fail $"could not read the draft release (HTTP ($request.status))" }
+  let release = try { open --raw $request.response | from json } catch { rm --force $request.response; fail "Forgejo returned an invalid release record" }
+  rm --force $request.response
+  if ($release.id? | default null) != $release_id { fail "draft release ID changed; inspect remote state before rerunning" }
+  validate-release $release $version $tag --draft
+  $release
+}
+
+# Deletes every asset of a draft whose tag is not pushed. Each run rebuilds
+# all assets and the job token cannot read draft bytes, so assets left by an
+# earlier run are replaced, never trusted.
+def delete-draft-assets [release_id: int, revision: string] {
+  let release = draft-without-tag $release_id $revision
+  let expected = asset-names (validate-versions)
+  let assets = $release.assets? | default []
+  for asset in $assets {
+    if ($asset.name? | default "") not-in $expected { fail "draft has an unexpected asset; refusing ambiguous repair" }
+    if (($asset.id? | describe) !~ '^int') or $asset.id <= 0 { fail $"draft asset ($asset.name) has no valid Forgejo asset ID" }
+  }
+  for asset in $assets {
+    let request = release-api DELETE $"releases/($release_id)/assets/($asset.id)"
+    rm --force $request.response
+    if $request.status != "204" { fail $"Forgejo refused to delete draft asset ($asset.name) (HTTP ($request.status)); inspect remote state before rerunning" }
+  }
+  let remaining = (draft-without-tag $release_id $revision).assets? | default []
+  if ($remaining | is-not-empty) { fail "draft still has assets after deletion; inspect remote state before rerunning" }
+}
+
+def "main delete-draft-assets" [release_id: int, revision: string] { delete-draft-assets $release_id $revision }
 
 def "main upload-missing-assets" [release_id: int, names: string] {
   let expected = asset-names (validate-versions)
@@ -559,5 +601,5 @@ def "main publish-release" [version: string, revision: string, tag: string] {
 }
 
 def main [] {
-  fail "usage: scripts/release.nu (version|validate|validate-tag TAG|prepare [--dry-run] BUMP|publish-plan REVISION EPOCH OUTPUT|push-tag TAG REVISION|upload-missing-assets RELEASE_ID NAMES|publish-release VERSION REVISION TAG|verify-final VERSION REVISION TAG)"
+  fail "usage: scripts/release.nu (version|validate|validate-tag TAG|prepare [--dry-run] BUMP|publish-plan REVISION EPOCH OUTPUT|push-tag TAG REVISION|delete-draft-assets RELEASE_ID REVISION|upload-missing-assets RELEASE_ID NAMES|publish-release VERSION REVISION TAG|verify-final VERSION REVISION TAG)"
 }

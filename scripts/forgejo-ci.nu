@@ -111,6 +111,11 @@ def "main publish" [revision: string] {
   let release_id = if $plan.needs_release {
     create-release $plan.version $plan.tag | into string
   } else { $plan.release_id }
+  # A draft without a tag may hold assets from an earlier run. This run's
+  # bytes can differ, so replace them all before the tag push.
+  if $plan.replace_assets {
+    checked $nu.current-exe [--no-config-file $release_script delete-draft-assets $release_id $revision]
+  }
   if ($plan.missing_assets | is-not-empty) {
     checked $nu.current-exe [--no-config-file $release_script upload-missing-assets $release_id $plan.missing_assets]
   }

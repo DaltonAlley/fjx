@@ -8,11 +8,9 @@ let
   rustPkgs = pkgs.extend rustOverlay;
   toolchain = rustPkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 in
-assert pkgs.nushell.version == "0.112.2";
 pkgs.mkShell {
   packages = [
     toolchain
-    pkgs.nushell
     pkgs.just
     (pkgs.python3.withPackages (ps: [ ps.pyyaml ]))
     pkgs.git

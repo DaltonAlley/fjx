@@ -158,7 +158,7 @@ def checked(arguments: list[str], *, capture: bool = False, stdin=None, input: b
 
 
 def lines(text: str) -> list[str]:
-    """Splits like Nushell's `lines`: one trailing newline ends the last line."""
+    """Splits into lines: one trailing newline ends the last line."""
     if text == "":
         return []
     parts = text.split("\n")
@@ -172,12 +172,12 @@ def is_int(value: Any) -> bool:
 
 
 def field(record: Any, name: str) -> Any:
-    """Reads an optional field like Nushell's `$record.name?`."""
+    """Reads an optional field from a record; a missing field is None."""
     return record.get(name) if isinstance(record, dict) else None
 
 
 def load_json(data: bytes) -> Any:
-    """Parses strict JSON. Empty input is null, as with Nushell's `from json`."""
+    """Parses strict JSON. Empty input is null."""
     if data == b"":
         return None
 
@@ -206,7 +206,7 @@ def sorted_names(names: list[Any]) -> list[str] | None:
 
 
 def file_names(directory: str) -> list[str]:
-    """Lists every non-directory entry, like Nushell's `glob DIR/* --no-dir`."""
+    """Lists every non-directory entry."""
     try:
         with os.scandir(directory) as entries:
             return sorted(entry.name for entry in entries if not entry.is_dir(follow_symlinks=False))

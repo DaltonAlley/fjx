@@ -26,12 +26,9 @@ Dyad, and automatic version-triggered publication; see [releasing](releasing.md)
   entry point on Linux for pull requests, pushes to `main`, and manual runs.
 - Keep `rust-toolchain.toml`, the release container's Rust toolchain, and the
   README's build prerequisites aligned when upgrading Rust.
-- When updating Nushell, review its release notes, verify the archive checksum
-  against upstream, and update `ci/Containerfile`, `shell.nix`, the check
-  script, and README together.
 - Review Dependabot proposals and keep the runtime dependency allowlist and
   exact pins. Review manifest and lockfile changes together, then run checks.
-- Review pinned container images, the Nu and just archive checksums, and the
+- Review pinned container images, the just archive checksum, and the
   `just` version in GitHub CI manually; Dependabot does not update those pins.
 
 Repository checks parse the workflow, check local Markdown links, and guard

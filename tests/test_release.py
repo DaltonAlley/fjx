@@ -218,7 +218,7 @@ class PackageTests(TempTestCase):
             self.assertEqual(read(os.path.join(output, archive)), read(os.path.join(duplicate, archive)),
                              f"non-deterministic archive {archive}")
         self.assertEqual(len(os.listdir(output)), 12, "six targets did not produce exactly twelve assets")
-        # Like Nushell's `save`, packaging never overwrites an existing asset.
+        # Packaging never overwrites an existing asset.
         self.assertFailed(self.package([output, "x86_64-unknown-linux-gnu"], environment), "already exists")
         self.assertFailed(self.package(["/", "all"], environment), "unsafe output directory")
 

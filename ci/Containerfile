@@ -4,12 +4,6 @@ FROM ghcr.io/rust-cross/cargo-zigbuild:0.23.3@sha256:76ed3823d8cd9d8b409b10f9c4c
 RUN apt-get update && apt-get install --no-install-recommends --yes \
       ca-certificates curl git util-linux zip unzip file python3 python3-yaml \
     && rm -rf /var/lib/apt/lists/*
-RUN curl --fail --silent --show-error --location \
-      https://github.com/nushell/nushell/releases/download/0.112.2/nu-0.112.2-x86_64-unknown-linux-musl.tar.gz \
-      --output /tmp/nu.tar.gz \
-    && echo 'd9c0ba0938beed6148c8a354c45612c0979d7a787794b8dd13e866ca3b571375  /tmp/nu.tar.gz' | sha256sum --check --strict \
-    && tar -xzf /tmp/nu.tar.gz --strip-components=1 -C /usr/local/bin nu-0.112.2-x86_64-unknown-linux-musl/nu \
-    && rm /tmp/nu.tar.gz
 # Debian trixie ships just 1.40, older than the 1.51.0 used in CI.
 RUN curl --fail --silent --show-error --location \
       https://github.com/casey/just/releases/download/1.51.0/just-1.51.0-x86_64-unknown-linux-musl.tar.gz \

@@ -237,7 +237,8 @@ def release-api [method: string, path: string, --attachment: path, --body: recor
   {status: ($request.stdout | str trim), response: $response}
 }
 
-def download-release-asset [asset: record, name: string] {
+# Checks an asset record's ID and its exact same-origin HTTPS download URL.
+def checked-asset-url [asset: record, name: string] {
   let api = $env.FORGEJO_API_URL? | default "" | str trim
   let repository = $env.FORGEJO_REPOSITORY? | default "" | str trim
   let token = $env.FORGEJO_TOKEN? | default "" | str trim
@@ -264,6 +265,35 @@ def download-release-asset [asset: record, name: string] {
   if $url != $request_url {
     fail $"release asset ($name) download URL must identify this exact repository, tag, and asset"
   }
+  $request_url
+}
+
+# Forgejo serves draft asset bytes on its web routes only to users with write
+# access to releases. The Actions job token gets write access only on the API,
+# and the API returns asset metadata, not bytes. So a draft is checked by
+# metadata only: exact names, IDs, URLs, and sizes. verify-final compares the
+# bytes once the release is public.
+def verify-draft-assets [release: record, version: string] {
+  let expected = asset-names $version
+  let local = (project-dir) | path join publish-assets
+  let local_names = glob ($local | path join '*') --no-dir | each { path basename } | sort
+  if $local_names != $expected { fail "locally checked release assets are unavailable or not exact" }
+  let names = $release.assets | each {|asset| $asset.name? | default "" } | sort
+  if $names != $expected { fail "draft release asset set is not exact" }
+  for asset in $release.assets {
+    let name = $asset.name
+    checked-asset-url $asset $name | ignore
+    let size = $asset.size? | default null
+    let local_size = ls ($local | path join $name) | first | get size | into int
+    if (($size | describe) !~ '^int') or $size != $local_size {
+      fail $"draft release asset ($name) size does not match the locally checked output"
+    }
+  }
+}
+
+def download-release-asset [asset: record, name: string] {
+  let token = $env.FORGEJO_TOKEN? | default "" | str trim
+  let request_url = checked-asset-url $asset $name
   let downloaded = mktemp
   let request = do {
     ('header = ' + ($"Authorization: token ($token)" | to json --raw) + (char nl)) | ^curl --silent --show-error --proto '=https' --max-redirs 0 --config - --output $downloaded --write-out '%{http_code}' --request GET --header 'Accept: application/octet-stream' $request_url
@@ -497,7 +527,7 @@ def verified-release [version: string, revision: string, tag: string, --draft, -
   validate-release $release $version $tag --draft=$draft
   if (($release.id? | describe) !~ '^int') or $release.id <= 0 { fail 'invalid final release ID' }
   if $names != (asset-names $version) { fail "final Forgejo release identity or assets are not exact" }
-  verify-remote-assets $release $version
+  if $draft { verify-draft-assets $release $version } else { verify-remote-assets $release $version }
   $release
 }
 
@@ -505,11 +535,12 @@ def "main verify-final" [version: string, revision: string, tag: string] {
   verified-release $version $revision $tag | ignore
 }
 
-# The only transition to a public release: all remote bytes must first match
-# the complete locally checked set. An ambiguous PATCH stops; reruns read state.
-# Forgejo also publishes a draft when its tag is pushed (a queued tag sync sets
-# draft=false seconds later). So the tag is pushed only here, after the bytes
-# are verified and right before the PATCH. Either one may publish first.
+# The only transition to a public release: the draft must first hold exactly
+# the locally checked names and sizes. The job token cannot read draft bytes,
+# so verify-final compares them after publication. An ambiguous PATCH stops;
+# reruns read state. Forgejo also publishes a draft when its tag is pushed (a
+# queued tag sync sets draft=false seconds later). So the tag is pushed only
+# here, after the draft check and right before the PATCH. Either may publish first.
 def "main publish-release" [version: string, revision: string, tag: string] {
   let release = verified-release $version $revision $tag --draft --allow-missing-tag
   if (inspect-remote-tags $tag $revision $version) { push-tag $tag $revision }

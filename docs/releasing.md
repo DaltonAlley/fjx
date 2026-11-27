@@ -30,11 +30,19 @@ static format validation in this workflow; the optional full local smoke
 pipeline below is separate.
 
 Only after local verification does the job create a **draft** Forgejo release
-and upload the twelve archive/checksum assets. It downloads every attachment
-and compares its bytes to the verified local file. Only then does it push the
+and upload the twelve archive/checksum assets. It then checks the draft through
+the API: the exact asset names, each asset ID, a same-origin HTTPS download URL,
+and each size against the verified local file. Only then does it push the
 annotated `fjx/vVERSION` tag and make the release public. The tag comes last
 because Forgejo publishes a draft as soon as it syncs a pushed tag with the
-same name. The job then verifies the public release again.
+same name. The job then downloads every public attachment, without redirects,
+and compares its bytes to the verified local file.
+
+The draft check cannot compare bytes. Forgejo serves draft attachments only to
+users with write access to releases, and the job token has that access only on
+the API, which returns metadata, not file contents. So an upload with the right
+size but wrong bytes is caught only after publication: the job fails, but the
+release is already public and needs a manual repair.
 The built-in repository job token supplies authentication; no PAT secret is
 needed for publication. Build/test subprocesses do not inherit that token. Main runs are
 serialized and are not canceled by later pushes.
@@ -42,7 +50,7 @@ serialized and are not canceled by later pushes.
 If publication fails, inspect the tag, release, and asset state before rerunning
 the original workflow. The helpers preserve matching tags, reject mismatched
 tags or unexpected metadata/assets, and upload only missing draft attachments.
-Failed builds create no tag or release; failed uploads or downloads leave the
+Failed builds create no tag or release; failed uploads or draft checks leave the
 release as a draft. A publication request can succeed even if its response is
 lost: rerun the original workflow to read the state and verify all assets again,
 without republishing or overwriting them. Writes are never retried automatically.

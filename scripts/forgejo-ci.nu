@@ -102,7 +102,8 @@ def "main publish" [revision: string] {
   let plan = publication-state $revision $epoch
   # Create the draft and its assets before the tag exists. Forgejo publishes a
   # draft as soon as it syncs a pushed tag with the same name, so publish-release
-  # pushes the tag only after every remote byte matches the local build.
+  # pushes the tag only after the draft's asset names and sizes match the local
+  # build. verify-final then compares every byte of the public release.
   let release_id = if $plan.needs_release {
     create-release $plan.version $plan.tag | into string
   } else { $plan.release_id }

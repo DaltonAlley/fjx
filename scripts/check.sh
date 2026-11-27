@@ -38,8 +38,8 @@ unset FJX_TOKEN FORGEJO_TOKEN GITEA_TOKEN GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN
 
 prerequisites=(cargo git bash script)
 if $full; then
-  # The release-tool tests are Nushell scripts.
-  prerequisites+=(nu tar gzip zip unzip file sha256sum mktemp)
+  # Release tools are Python; the CI and mirror tools are still Nushell.
+  prerequisites+=(python3 nu tar gzip zip unzip file sha256sum mktemp)
 fi
 for program in "${prerequisites[@]}"; do
   if ! type -P "$program" >/dev/null; then
@@ -48,6 +48,9 @@ for program in "${prerequisites[@]}"; do
 done
 if $full && [[ "$(nu --version)" != "$nu_version" ]]; then
   fail "fjx checks require Nushell $nu_version"
+fi
+if $full && ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+  fail "fjx checks require Python 3.11 or newer"
 fi
 
 run_check cargo build --locked
@@ -61,8 +64,8 @@ run_check cargo fmt --all -- --check
 run_check cargo clippy --locked --all-targets -- -D warnings
 RUSTDOCFLAGS='-D warnings' run_check cargo doc --locked --no-deps
 run_check nu --no-config-file tests/repository.nu
-run_check nu --no-config-file tests/release.nu
+run_check python3 -m unittest discover --start-directory tests --pattern 'test_*.py'
 run_check nu --no-config-file tests/forgejo-ci.nu
 run_check nu --no-config-file tests/github-mirror.nu
-run_check nu --no-config-file scripts/release.nu validate
+run_check python3 scripts/release.py validate
 printf 'All fjx checks passed.\n'

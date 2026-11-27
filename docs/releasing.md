@@ -96,7 +96,7 @@ installer; use the dalton/nixos deployments above.
 
 ## Prepare a version
 
-These commands need just and Nushell 0.112.2. From the repository root:
+These commands need just and Python 3.11 or newer. From the repository root:
 
 ```sh
 just release-validate

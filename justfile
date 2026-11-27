@@ -17,20 +17,20 @@ check-full:
 
 # Check that the version files agree
 release-validate:
-    nu --no-config-file scripts/release.nu validate
+    python3 scripts/release.py validate
 
 # Bump the version: patch, minor or major; add --dry-run to preview
 release-prepare *args:
-    nu --no-config-file scripts/release.nu prepare "$@"
+    python3 scripts/release.py prepare "$@"
 
 # Check a release tag name, for example fjx/v0.3.1
 release-validate-tag tag:
-    nu --no-config-file scripts/release.nu validate-tag "$1"
+    python3 scripts/release.py validate-tag "$1"
 
 # Build release archives: DIR [TARGET|all]
 package *args:
-    nu --no-config-file scripts/package-release.nu "$@"
+    python3 scripts/package_release.py "$@"
 
 # Verify release archives: DIR VERSION --source-date-epoch EPOCH
 package-verify *args:
-    nu --no-config-file scripts/package-release.nu verify "$@"
+    python3 scripts/package_release.py verify "$@"

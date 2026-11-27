@@ -116,7 +116,7 @@ is checked against FIPS digest vectors and the RFC 7636 S256 example.
 Unit tests live with their modules. Integration tests in `tests/*.rs` exercise
 the CLI with local servers, temporary repositories, and private config fixtures,
 including redaction, host boundaries, pagination failures, and terminal input.
-`tests/release.nu` exercises version transactions and packaging/publication
+`tests/test_release.py` exercises version transactions and packaging/publication
 helpers using fixtures and simulated tools. Passing those tests does not mean a
 binary has been published or validated on native Windows or macOS hardware.
 

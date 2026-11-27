@@ -70,6 +70,10 @@ pub(crate) struct Config {
     version: u8,
     default_host: Option<String>,
     hosts: BTreeMap<String, HostEntry>,
+    /// Fields this build does not know, kept so a rewrite by an older or
+    /// newer build does not drop the other's data.
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -83,6 +87,9 @@ struct HostEntry {
     /// such as a `Host` alias from the user's SSH configuration.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     ssh_aliases: Vec<String>,
+    /// Per-host fields this build does not know; see `Config::extra`.
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -104,6 +111,7 @@ impl Config {
             version: 1,
             default_host: None,
             hosts: BTreeMap::new(),
+            extra: serde_json::Map::new(),
         }
     }
 
@@ -355,11 +363,12 @@ impl Config {
         if !valid_user(&user) {
             return Err(Error::data("Forgejo returned an invalid user name"));
         }
-        // A new token for the same host keeps the aliases that point at it.
-        let ssh_aliases = self
+        // A new token for the same host keeps the aliases that point at it
+        // and any fields written by other fjx builds.
+        let (ssh_aliases, extra) = self
             .hosts
             .remove(host.as_str())
-            .map(|entry| entry.ssh_aliases)
+            .map(|entry| (entry.ssh_aliases, entry.extra))
             .unwrap_or_default();
         self.hosts.insert(
             host.as_str().to_owned(),
@@ -368,6 +377,7 @@ impl Config {
                 token: token.into_string(),
                 oauth: None,
                 ssh_aliases,
+                extra,
             },
         );
         self.default_host = Some(host.as_str().to_owned());
@@ -1218,5 +1228,51 @@ mod tests {
             .unwrap_or_else(|| panic!("credential is missing"));
         assert_eq!(credential.user, "nested-user");
         assert_eq!(credential.token.as_str(), "nested-token");
+    }
+
+    #[test]
+    fn rewrites_keep_fields_from_other_builds() {
+        let one = Host::parse("https://one.example").unwrap_or_else(|error| panic!("{error}"));
+        let two = Host::parse("https://two.example").unwrap_or_else(|error| panic!("{error}"));
+        let mut config: Config = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "default_host": one.as_str(),
+            "future_top": {"nested": [1, 2]},
+            "hosts": {
+                one.as_str(): {"user": "u", "token": "t1", "future_host": "kept"},
+                two.as_str(): {"token": "t2", "future_host": 2},
+            },
+        }))
+        .unwrap_or_else(|error| panic!("{error}"));
+        config
+            .add_ssh_alias(&one, "one-ssh")
+            .unwrap_or_else(|error| panic!("{error}"));
+        config
+            .login(
+                &one,
+                "u".to_owned(),
+                Token::parse("new".to_owned()).unwrap_or_else(|error| panic!("{error}")),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        config
+            .save_user(&two, "v".to_owned())
+            .unwrap_or_else(|error| panic!("{error}"));
+        let value = serde_json::to_value(&config).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(value["future_top"], serde_json::json!({"nested": [1, 2]}));
+        assert_eq!(value["hosts"][one.as_str()]["future_host"], "kept");
+        assert_eq!(value["hosts"][one.as_str()]["token"], "new");
+        assert_eq!(
+            value["hosts"][one.as_str()]["ssh_aliases"],
+            serde_json::json!(["one-ssh"])
+        );
+        assert_eq!(value["hosts"][two.as_str()]["future_host"], 2);
+        // Known fields are not duplicated into the catch-all.
+        let text = value.to_string();
+        assert_eq!(text.matches("\"token\"").count(), 2);
+        assert_eq!(text.matches("\"version\"").count(), 1);
+        assert!(config.logout(&one));
+        let value = serde_json::to_value(&config).unwrap_or_else(|error| panic!("{error}"));
+        assert!(value["hosts"].get(one.as_str()).is_none());
+        assert_eq!(value["future_top"], serde_json::json!({"nested": [1, 2]}));
     }
 }

@@ -139,7 +139,16 @@ def test-orchestration [] {
       check ($failed.exit_code != 0) 'failed build must stop publication'
       check (not (($state | path join release.json) | path exists)) 'failed build created a release'
       check (not (($state | path join tag) | path exists)) 'failed build pushed a tag'
-      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag] }) 'failed build attempted a write'
+      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag DELETE] }) 'failed build attempted a write'
+
+      # A Windows build whose PE timestamp is not the commit time is not
+      # reproducible, so a rerun could not rebuild the same bytes.
+      '' | save --force --raw ($state | path join calls)
+      let unpinned = run-ci $project [publish $revision] {FAKE_UNPINNED_LINK: 'true'}
+      check ($unpinned.exit_code != 0) 'unpinned Windows build must stop publication'
+      check ($unpinned.stderr | str contains 'PE timestamp') $"unpinned build failure omitted its reason: ($unpinned.stderr)"
+      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag DELETE] }) 'unpinned build attempted a write'
+      fresh-checkout $project
 
       '' | save --force --raw ($state | path join calls)
       let first_asset = 'fjx-1.2.10-aarch64-apple-darwin.tar.gz'
@@ -160,26 +169,30 @@ def test-orchestration [] {
 
       # The job token cannot read draft bytes, so the draft is checked by its
       # API metadata. A wrong size, foreign URL or missing ID must stop before
-      # the tag push and the public transition.
-      '' | save --force --raw ($state | path join calls)
-      for metadata in [size origin id] {
+      # the tag push and the public transition. Each rerun first replaces the
+      # assets an earlier run left on the untagged draft. An asset without an
+      # ID cannot be deleted, so that run stops before any write.
+      for case in [[metadata deletes uploads]; [size 1 12] [origin 12 12] [id 0 0]] {
         fresh-checkout $project
-        let bad = run-ci $project [publish $revision] {FAKE_DRAFT_METADATA: $metadata}
-        check ($bad.exit_code != 0) $"wrong draft ($metadata) must stop publication"
-        check ((open ($state | path join release.json)).draft) $"wrong draft ($metadata) published a release"
+        '' | save --force --raw ($state | path join calls)
+        let bad = run-ci $project [publish $revision] {FAKE_DRAFT_METADATA: $case.metadata}
+        check ($bad.exit_code != 0) $"wrong draft ($case.metadata) must stop publication"
+        check ((open ($state | path join release.json)).draft) $"wrong draft ($case.metadata) published a release"
+        let bad_calls = calls $state
+        check (($bad_calls | where event == PATCH | is-empty)) 'wrong draft metadata reached the public transition'
+        check (($bad_calls | where event == push-tag | is-empty)) 'wrong draft metadata reached the tag push that publishes a draft'
+        check (($bad_calls | where event == download | is-empty)) 'draft check tried to download draft bytes'
+        let writes = $bad_calls | where event in [DELETE POST] | get event
+        check ($writes == (($case.deletes | if $in > 0 { 1..$in | each { 'DELETE' } } else { [] }) ++ ($case.uploads | if $in > 0 { 1..$in | each { 'POST' } } else { [] }))) $"rerun ($case.metadata) must delete every old draft asset, then upload all twelve: ($writes)"
       }
-      let bad_calls = calls $state
-      check (($bad_calls | where event == PATCH | is-empty)) 'wrong draft metadata reached the public transition'
-      check (($bad_calls | where event == push-tag | is-empty)) 'wrong draft metadata reached the tag push that publishes a draft'
-      check (($bad_calls | where event == download | is-empty)) 'draft check tried to download draft bytes'
-      check (($bad_calls | where event == POST | length) == 11) 'retry must upload only the missing assets'
 
       fresh-checkout $project
       '' | save --force --raw ($state | path join calls)
       let ambiguous = run-ci $project [publish $revision] {FAKE_AMBIGUOUS_PUBLISH: 'true'}
       check ($ambiguous.exit_code != 0) 'ambiguous publication must stop and report failure'
       let attempts = calls $state
-      check (($attempts | where event == POST | is-empty)) 'complete draft retry must not upload or recreate anything'
+      check (($attempts | where event == POST | where {|call| $call.value | str ends-with '/releases' } | is-empty)) 'draft retry must not create a second release'
+      check (($attempts | where event == DELETE | length) == 12 and ($attempts | where event == POST | length) == 12) 'untagged draft retry must replace all twelve assets'
       check (($attempts | where event == PATCH | length) == 1) 'publication write was retried'
       let publication = $attempts | enumerate | where {|row| $row.item.event == PATCH } | first | get index
       check (($attempts | take $publication | where event == download | is-empty)) 'publication tried to download draft bytes'
@@ -192,7 +205,7 @@ def test-orchestration [] {
       check ($retry.exit_code == 0) $retry.stderr
       let published = open ($state | path join release.json)
       check (not $published.draft and ($published.assets | length) == 12) 'recovery must verify a complete public release'
-      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag] }) 'published retry must be read-only after the rebuild'
+      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag DELETE] }) 'published retry must be read-only after the rebuild'
       check ((calls $state | where event == download | length) == 12) 'published retry must verify every attachment again'
 
       # An old public-but-partial release is an explicit repair, never appended.
@@ -200,7 +213,7 @@ def test-orchestration [] {
       fresh-checkout $project
       '' | save --force --raw ($state | path join calls)
       check ((run-ci $project [publish $revision]).exit_code != 0) 'partial public release must be rejected'
-      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag] }) 'partial public release was modified'
+      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag DELETE] }) 'partial public release was modified'
 
       # Also exercise a normal, unambiguous publication from an empty server,
       # with Forgejo's tag sync publishing the draft (queued) or not (never).
@@ -227,6 +240,44 @@ def test-orchestration [] {
         check (($events | skip $tag_push | where event == download | length) == 12) 'public release bytes must be verified after the tag push'
       }
 
+      # Issue #27: an untagged draft holds a same-size Windows zip from an
+      # earlier run. The rerun must replace it, not publish the old bytes.
+      rm --force ($state | path join release.json) ($state | path join tag) ($state | path join pending-tag-sync)
+      rm --recursive ($state | path join assets)
+      mkdir ($state | path join assets)
+      do { ^$real_git tag --delete fjx/v1.2.10 } | complete | ignore
+      fresh-checkout $project
+      check ((run-ci $project [publish $revision] {FAKE_DRAFT_METADATA: size}).exit_code != 0) 'stale draft setup must stop before the tag push'
+      let windows_zip = $state | path join assets 'fjx-1.2.10-x86_64-pc-windows-gnu.zip'
+      open --raw $windows_zip | into binary | bytes reverse | save --force --raw $windows_zip
+      fresh-checkout $project
+      '' | save --force --raw ($state | path join calls)
+      let replaced = run-ci $project [publish $revision]
+      check ($replaced.exit_code == 0) $"stale draft assets must be replaced: ($replaced.stderr)"
+      let events = calls $state
+      check (($events | where event == DELETE | length) == 12) 'rerun must delete every stale draft asset'
+      check (($events | where event == POST | length) == 12) 'rerun must upload all twelve assets again'
+      let last_delete = $events | enumerate | where {|row| $row.item.event == DELETE } | last | get index
+      let tag_push = $events | enumerate | where {|row| $row.item.event == push-tag } | first | get index
+      check ($last_delete < $tag_push) 'draft assets must be deleted before the tag push'
+
+      # Once the tag is pushed, Forgejo may publish the draft at any moment.
+      # A rerun must keep the draft assets and only finish publication.
+      open ($state | path join release.json) | update draft true | to json | save --force --raw ($state | path join release.json)
+      fresh-checkout $project
+      '' | save --force --raw ($state | path join calls)
+      let tagged = run-ci $project [publish $revision]
+      check ($tagged.exit_code == 0) $"tagged draft rerun failed: ($tagged.stderr)"
+      check (calls $state | all {|call| $call.event not-in [POST DELETE push-tag] }) 'tagged draft assets were deleted or uploaded'
+      check ((calls $state | where event == PATCH | length) == 1) 'tagged draft must be published once'
+      # The delete helper checks the tag itself, right before it deletes.
+      open ($state | path join release.json) | update draft true | to json | save --force --raw ($state | path join release.json)
+      '' | save --force --raw ($state | path join calls)
+      let guarded = do { ^$nu.current-exe --no-config-file ($project | path join scripts release.nu) delete-draft-assets 42 $revision } | complete
+      check ($guarded.exit_code != 0 and ($guarded.stderr | str contains 'already pushed')) $"delete helper ignored the pushed tag: ($guarded.stderr)"
+      check (calls $state | all {|call| $call.event != DELETE }) 'delete helper deleted assets after the tag push'
+      open ($state | path join release.json) | update draft false | to json | save --force --raw ($state | path join release.json)
+
       # Known limit: a same-size byte mismatch is only caught after publication.
       # The job must still fail, and a rerun must not change the public release.
       rm --force ($state | path join release.json) ($state | path join tag) ($state | path join pending-tag-sync)
@@ -242,7 +293,7 @@ def test-orchestration [] {
       fresh-checkout $project
       '' | save --force --raw ($state | path join calls)
       check ((run-ci $project [publish $revision] {FAKE_CORRUPT_DOWNLOAD: 'true'}).exit_code != 0) 'rerun must still report the byte mismatch'
-      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag] }) 'rerun modified a public release with mismatched bytes'
+      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag DELETE] }) 'rerun modified a public release with mismatched bytes'
     }
   } catch {|error|
     cd ($root | path dirname)

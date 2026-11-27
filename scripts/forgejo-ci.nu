@@ -50,7 +50,11 @@ export def build-assets [revision: string] {
   let binaries = mktemp -d
   try {
     for target in (release-targets) {
-      checked cargo [zigbuild --locked --release --target $target.triple]
+      # The Windows linker writes the link time into the PE header unless
+      # SOURCE_DATE_EPOCH is set. Pin it so a rerun builds the same bytes.
+      with-env {SOURCE_DATE_EPOCH: ($epoch | into string)} {
+        checked cargo [zigbuild --locked --release --target $target.triple]
+      }
       let directory = $binaries | path join $target.triple
       mkdir $directory
       let binary = $env.CARGO_TARGET_DIR? | default ($project_dir | path join target) | path join $target.triple release $target.executable
@@ -65,7 +69,7 @@ export def build-assets [revision: string] {
     with-env {FJX_PACKAGE_BIN_ROOT: $binaries} {
       checked $nu.current-exe [--no-config-file $package_script publish-assets all --source-date-epoch ($epoch | into string)]
     }
-    verify-assets publish-assets $version
+    verify-assets publish-assets $version --source-date-epoch $epoch
   } catch {|error|
     rm --recursive --force $binaries
     error make $error.raw
@@ -107,6 +111,11 @@ def "main publish" [revision: string] {
   let release_id = if $plan.needs_release {
     create-release $plan.version $plan.tag | into string
   } else { $plan.release_id }
+  # A draft without a tag may hold assets from an earlier run. This run's
+  # bytes can differ, so replace them all before the tag push.
+  if $plan.replace_assets {
+    checked $nu.current-exe [--no-config-file $release_script delete-draft-assets $release_id $revision]
+  }
   if ($plan.missing_assets | is-not-empty) {
     checked $nu.current-exe [--no-config-file $release_script upload-missing-assets $release_id $plan.missing_assets]
   }

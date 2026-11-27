@@ -77,13 +77,18 @@ def main [] {
       check ((open $state).draft and ((open $state).assets | length) == 1) 'lost response must preserve the partial draft'
       check ((writes $root | length) == 2) 'ambiguous upload must not be retried in the same run'
       '' | save --force ($root | path join calls)
+      # The partial draft holds stale bytes. The rerun must replace them.
+      let stale = (open $state).assets.0.name
+      'stale bytes' | save --force --raw ($root | path join github-assets $stale)
       # The release job copies right after publishing; the tag may arrive late.
       let recovered = run {FAKE_PAGINATE: 'true', FAKE_TAG_LATE: '1'}
       check ($recovered.exit_code == 0) $recovered.stderr
       check ((open --raw ($root | path join tag-lookups) | into int) >= 2) 'late GitHub tag was not looked up again'
       let published = open $state
       check (not $published.draft and ($published.assets | length) == 12 and $published.body == $release.body) 'rerun must finish and publish the same release'
-      check ((writes $root | where method == POST | length) == 11) 'rerun uploaded an existing asset again'
+      check ((writes $root | where method == DELETE | length) == 1) 'rerun must delete the stale draft asset'
+      check ((writes $root | where method == POST | length) == 12) 'rerun must upload all twelve assets to the draft'
+      check ((open --raw ($root | path join github-assets $stale)) == (open --raw ($assets | path join $stale))) 'stale draft bytes were published'
       '' | save --force ($root | path join calls)
       let repeated = run
       check ($repeated.exit_code == 0 and (writes $root | is-empty)) 'complete rerun must verify bytes without writes'

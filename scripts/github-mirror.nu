@@ -193,14 +193,21 @@ def sync-one [source_release: record, directory: path] {
     api github POST releases $directory --body ($identity | merge {draft: true, make_latest: 'false'})
   } else { $existing.0 }
   if ($release.id? | describe) != int or $release.id <= 0 or $release.tag_name != $identity.tag_name { fail 'invalid GitHub release identity' }
-  let assets = list-all github $"releases/($release.id)/assets" $directory
-  validate-assets $assets $identity.tag_name --partial
-  if not $release.draft and ($assets | length) != 12 { fail 'existing public GitHub release is incomplete; explicit repair is required' }
+  let listed = list-all github $"releases/($release.id)/assets" $directory
+  validate-assets $listed $identity.tag_name --partial
+  if not $release.draft and ($listed | length) != 12 { fail 'existing public GitHub release is incomplete; explicit repair is required' }
+  # A draft may hold assets from an earlier, interrupted copy. Replace them
+  # all, so stale bytes are never published. A public release is never changed.
+  let assets = if $release.draft and ($listed | is-not-empty) {
+    for asset in $listed { api github DELETE $"releases/assets/($asset.id)" $directory | ignore }
+    if (list-all github $"releases/($release.id)/assets" $directory | is-not-empty) { fail 'draft assets remain after deletion; rerun to reconcile the release' }
+    []
+  } else { $listed }
   for source_asset in $source_release.assets {
     let matches = $assets | where name == $source_asset.name
     if ($matches | is-empty) {
       # Only missing names are uploaded. An uncertain response stops this run;
-      # the next run lists and verifies remote bytes before another write.
+      # the next run replaces the draft's assets before publishing.
       let uploaded = request POST $"https://uploads.github.com/repos/($destination)/releases/($release.id)/assets?name=($source_asset.name)" $directory --file ($assets_directory | path join $source_asset.name)
       if $uploaded.status != '201' { fail 'asset upload failed; rerun to reconcile the existing release' }
     }

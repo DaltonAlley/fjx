@@ -276,3 +276,41 @@ fn command_help_and_schema_skip_context_stdin_and_network() {
         assert!(!result.stdout.is_empty());
     }
 }
+
+#[test]
+fn client_integration_commands_and_flags_are_documented() {
+    let list = schema(&["auth", "list"]);
+    assert_eq!(
+        list["commands"][0]["output_fields"],
+        serde_json::json!(["kind", "host", "user", "default", "ssh_aliases"])
+    );
+    assert_eq!(list["commands"][0]["write"], false);
+    assert!(text(&["auth"]).contains("fjx auth list"));
+    assert!(text(&["auth", "list"]).contains("no request"));
+    for create in [&["issue", "create"][..], &["pr", "create"]] {
+        assert!(text(create).contains("new URL alone on one stderr line"));
+        assert!(
+            schema(create)["commands"][0]["constraints"]
+                .to_string()
+                .contains("stderr")
+        );
+    }
+}
+
+#[test]
+fn api_include_is_documented_in_help_and_schema() {
+    let api = schema(&["api"]);
+    assert!(
+        api["commands"][0]["flags"]
+            .to_string()
+            .contains("--include")
+    );
+    assert!(
+        api["commands"][0]["constraints"]
+            .to_string()
+            .contains("every page with --paginate")
+    );
+    let help = text(&["api"]);
+    assert!(help.contains("--include"));
+    assert!(help.contains("Set-Cookie is dropped"));
+}

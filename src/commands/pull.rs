@@ -590,7 +590,8 @@ fn create(
         return repo.dry_run(common.json, "POST", &path, &payload);
     }
     let value: PullResponse = repo.write("POST", &path, &payload, "pull request")?;
-    render_one(common.json, value)
+    let url = value.html_url.clone();
+    Ok(render_one(common.json, value)?.with_created_url(common.json, &url))
 }
 
 fn diff(common: &Args, number: u64) -> Result<Outcome, Error> {

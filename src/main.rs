@@ -25,6 +25,11 @@ fn main() {
                 eprintln!("fjx: could not write output: {error}");
                 std::process::exit(8);
             }
+            if !outcome.stderr.is_empty() {
+                // Stdout already holds the complete result; a closed stderr
+                // must not turn success into failure.
+                let _ = std::io::stderr().lock().write_all(&outcome.stderr);
+            }
             if outcome.code != 0 {
                 std::process::exit(i32::from(outcome.code));
             }
@@ -52,6 +57,7 @@ fn run(args: &Args) -> Result<Outcome, Error> {
     match &args.command {
         Command::AuthLogin { options } => commands::auth::login(args, options),
         Command::AuthStatus => commands::auth::status(args),
+        Command::AuthList => commands::auth::list(args),
         Command::AuthLogout => commands::auth::logout(args),
         Command::AuthSetupGit => commands::auth::setup_git(args),
         Command::AuthGitCredential { operation } => {

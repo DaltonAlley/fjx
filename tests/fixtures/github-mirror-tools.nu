@@ -82,6 +82,13 @@ export def fake-curl [args: list<string>] {
     return
   }
   let release = open $state
+  if $method == DELETE and ($parsed.path | str contains '/releases/assets/') {
+    if not $release.draft { error make {msg: 'public GitHub asset deleted'} }
+    let id = $parsed.path | path basename | into int
+    $release | update assets ($release.assets | where id != $id) | to json | save --force $state
+    print --no-newline 204
+    return
+  }
   if ($parsed.path | str contains '/releases/assets/') {
     let id = $parsed.path | path basename | into int
     let asset = $release.assets | where id == $id | first

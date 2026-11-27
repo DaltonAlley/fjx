@@ -192,6 +192,8 @@ const BOARD_RESULT: &[&str] = &[
 const SSH_ALIAS_RESULT: &[&str] = &["kind", "action", "ok", "host", "ssh_alias"];
 const BOARD_FLAG: &str =
     "--board TITLE | --board-id ID (default: the repository's only open board)";
+const CREATED_URL: &str = "plain output also writes the new URL alone on one stderr line after a successful create; --json and --dry-run keep stderr empty";
+const API_INCLUDE: &str = "--include writes each response's status line and headers to stderr as it arrives, then a blank line, including for HTTP errors and for every page with --paginate; names are lowercase, values use the plain-output encoding, Set-Cookie is dropped; --include is not valid with --dry-run";
 const PAGING: &str = "--page N (default 1), --all, --limit N (default 30)";
 const BODY: &str = "--body TEXT | --body-file PATH|-";
 const METADATA: &str = "--label NAME, --label-id ID, --assignee NAME (repeatable), --milestone NAME | --milestone-id ID";
@@ -353,6 +355,9 @@ impl CommandMeta {
             "issue create" => arguments
                 .mutually_exclusive
                 .push(&["--board", "--board-id"]),
+            "auth list" => arguments.constraints.push(
+                "reads only the token file: no network, no token check, no tokens in output; --host and -R are not valid",
+            ),
             "auth add-ssh-alias" | "auth remove-ssh-alias" => {
                 arguments
                     .constraints
@@ -457,10 +462,12 @@ impl CommandMeta {
                 arguments
                     .constraints
                     .push("--paginate requires GET; --dry-run requires a write method");
+                arguments.constraints.push(API_INCLUDE);
             }
             "issue list" | "pr list" => arguments
                 .constraints
                 .push("--sort is forwarded to Forgejo; accepted values depend on the server"),
+            "issue create" | "pr create" => arguments.constraints.push(CREATED_URL),
             _ => {}
         }
     }
@@ -718,6 +725,15 @@ static COMMANDS: &[CommandMeta] = &[
         [],
         "fjx auth status --json",
         &["kind", "host", "user", "source", "ssh_aliases"],
+        false,
+        false
+    ),
+    command!(
+        "auth list",
+        "fjx auth list",
+        [],
+        "fjx auth list --json",
+        &["kind", "host", "user", "default", "ssh_aliases"],
         false,
         false
     ),
@@ -1234,6 +1250,7 @@ static COMMANDS: &[CommandMeta] = &[
         [
             "-X GET|POST|PUT|PATCH|DELETE (default GET, POST with --input)",
             "--input PATH|-, --paginate (GET only)",
+            "--include (status line and headers on stderr; stdout stays the body)",
             "--dry-run (write only), --yes (DELETE only)"
         ],
         "fjx api /repos/owner/repo --json",
@@ -1361,6 +1378,7 @@ fn board_help(name: &str, text: &mut String) {
         "board move" => text.push_str("NUMBER is an issue or pull-request number. COLUMN is a column title, matched exactly and then ignoring case; --board matches a board title the same way. An issue without a card is added to the board; a card already on it moves. Reads the board, its columns and the issue first, including in dry runs.\n"),
         "board remove" => text.push_str("Removes the card and keeps the issue; board move adds it again. Reads each column to find the card, including in dry runs.\n"),
         "issue create" => text.push_str("--board and --board-id resolve the board before creating the issue and send its ID as projects. A forge without that field would ignore it, so fjx refuses a forge without a board API. Place the card with board move.\n"),
+        "auth list" => text.push_str("Lists every saved login from the token file, in host order. It makes no request and does not check tokens; use auth status for that. user is null (empty in plain output) when the file has no user name for the login. Plain output: HOST USER DEFAULT ALIASES, with ALIASES comma-separated.\n"),
         "auth add-ssh-alias" => text.push_str("Makes repository remotes whose SSH host is ALIAS (for example a Host entry in ~/.ssh/config) resolve to the saved login for --host. Remotes that name the host's own DNS name need no alias. The alias is saved with the login, kept across auth login, and removed by auth logout; auth status --json lists it. The remote's repository path is used as given.\n"),
         _ => {}
     }
@@ -1413,6 +1431,7 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
         board_help(command.name, &mut text);
         if command.name == "api" {
             text.push_str("Safety: raw DELETE requires --yes; writes are never retried. Raw API output has no typed field schema.\n");
+            writeln!(text, "Headers: {API_INCLUDE}.").map_err(format_error)?;
         }
         if matches!(command.name, "webhook create" | "webhook edit") {
             text.push_str("Input: config {url, content_type: json, http_method: POST, secret}, events [names], active, branch_filter, authorization_header. Create defaults type to forgejo and active to true; config.url and nonempty events are required. Edit changes only supplied top-level fields; supplied config requires url. Other providers use fjx api.\nSafety: URLs, secrets and authorization headers are omitted from results and redacted in dry runs. Protect input files; prefer stdin from your secret store.\n");
@@ -1423,6 +1442,9 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
         if command.name == "webhook edit" {
             text.push_str("Forgejo 17 resets omitted events, branch_filter and authorization_header. fjx reads and preserves them, even during dry runs; concurrent edits can race. Signing-secret rotation and workflow/action-run/package subscription changes require a replacement hook because the server ignores those edits.\n");
             text.push_str("Hooks reporting every event require a replacement: the API hides Send everything mode, whose edits can lose CI/package subscriptions. Explicit all-event selections are indistinguishable and also refused, including dry runs.\n");
+        }
+        if matches!(command.name, "issue create" | "pr create") {
+            writeln!(text, "Stderr: {CREATED_URL}.").map_err(format_error)?;
         }
         if command.name == "pr merge" {
             text.push_str("Safety: --match-head guards the expected head SHA; --auto requests server-side automatic merge.\n");
@@ -1485,6 +1507,7 @@ pub(crate) fn output_fields(command: &crate::args::Command) -> Option<&'static [
     let (group, action) = match command {
         Command::AuthLogin { .. } => ("auth", "login"),
         Command::AuthStatus => ("auth", "status"),
+        Command::AuthList => ("auth", "list"),
         Command::AuthLogout => ("auth", "logout"),
         Command::AuthSetupGit => ("auth", "setup-git"),
         Command::AuthSshAlias { remove: true, .. } => ("auth", "remove-ssh-alias"),

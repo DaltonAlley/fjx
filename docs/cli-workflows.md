@@ -271,7 +271,12 @@ cannot be another saved host's DNS name, so a remote cannot send a token to a
 host you did not log in to. `auth status --json` lists a host's aliases,
 `auth remove-ssh-alias` forgets one, and `auth logout` removes them with the
 login. Versions before the alias commands ignore the field and drop it when they
-rewrite the token file.
+rewrite the token file. Versions after 0.5.2 keep every token file field they
+do not know, at the top level and for each host, when they rewrite the file.
+
+`auth list` shows every saved login with its host, user, default flag and SSH
+aliases. It reads only the token file: it makes no request, checks no token and
+never prints one. Use `auth status` to check that a token still works.
 
 On Windows, saved tokens default to `%APPDATA%\fjx\hosts.json`, with a `%USERPROFILE%\AppData\Roaming` fallback. Files are created with a protected DACL granting access only to the current user. Before reading, fjx checks the open file's owner and DACL; only the current user, SYSTEM, and built-in Administrators may have access. Filesystems that cannot enforce or report these permissions fail closed. The file remains plaintext on disk, protected by Windows access controls. This works in SSH sessions without Credential Manager. Environment tokens still work without `HOME`, `APPDATA`, or `USERPROFILE` when `--host` or `FJX_HOST` supplies the host.
 
@@ -284,6 +289,7 @@ Saved logins work on Unix and native Windows.
 ```text
 fjx auth login --host https://forgejo.example
 fjx auth status --json
+fjx auth list --json
 fjx auth setup-git --host https://forgejo.example
 fjx auth add-ssh-alias forge-ssh --host https://forgejo.example
 fjx repo view -R owner/repo
@@ -320,6 +326,7 @@ fjx webhook test -R owner/repo 1 --ref main
 fjx webhook delete -R owner/repo 1 --yes --dry-run
 fjx api /version --json
 fjx api /repos/owner/repo/issues --paginate --json
+fjx api /repos/owner/repo/issues --include --json
 ```
 
 ## Organizations and teams
@@ -457,7 +464,7 @@ Issue/PR metadata names may need paginated read requests, including during dry-r
 
 `fjx help COMMAND ACTION` and `fjx COMMAND ACTION --help` show focused help without repository or authentication context. `fjx schema COMMAND ACTION --json` exposes versioned command metadata for tooling. Use `--json --fields number,title,state` to select documented top-level fields without changing bare `--json`. Unknown or duplicate fields fail before any request or write. Projection preserves object/array shapes, null values, and exit codes. It reduces stdout, not the server response size. Issue/PR/run list filters execute on the server and are preserved across pages.
 
-`issue view --human` and `pr view --human` show readable multiline bodies and metadata. Existing plain and JSON defaults remain unchanged except for additive JSON metadata fields. Issue and PR JSON include normalized milestone metadata; PR JSON also distinguishes merged from closed and includes label/assignee names. Comment/review write results expose IDs where supplied by the server. Raw `api --json` emits `null` for a successful empty response.
+`issue view --human` and `pr view --human` show readable multiline bodies and metadata. Existing plain and JSON defaults remain unchanged except for additive JSON metadata fields. Issue and PR JSON include normalized milestone metadata; PR JSON also distinguishes merged from closed and includes label/assignee names. Comment/review write results expose IDs where supplied by the server. Raw `api --json` emits `null` for a successful empty response. `api --include` writes each response's status line and headers to stderr, one block per page with `--paginate`, and keeps stdout as the body; it escapes them like plain output and drops `Set-Cookie`. After a successful `issue create` or `pr create`, plain mode also writes the new URL alone on one stderr line, as `gh` does; stdout keeps the record, and `--json` keeps stderr empty.
 
 Plain output is stable and short. Each tab separates fields and each line feed ends a record. Within server-provided fields, backslash, tab, carriage return, and line feed encode as `\\`, `\t`, `\r`, and `\n`; every other Unicode control scalar encodes as `\u{HEX}` with uppercase hex and no leading zeroes. This encoding is reversible, so text that looks like an escape starts with `\\`. `--json` emits one compact JSON value with the original field values and no plain-output encoding. Errors go to stderr and leave stdout empty. See `fjx --help` for exit classes.
 

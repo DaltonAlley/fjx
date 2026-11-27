@@ -13,6 +13,7 @@ pkgs.mkShell {
   packages = [
     toolchain
     pkgs.nushell
+    pkgs.just
     pkgs.git
     pkgs.bash
     pkgs.util-linux

@@ -34,33 +34,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes git util-linux
 
-      - name: Install pinned Nushell
-        # Digest from nushell/nushell's 0.112.2 release assets. Review both on update.
-        env:
-          NU_VERSION: 0.112.2
-          NU_SHA256: d9c0ba0938beed6148c8a354c45612c0979d7a787794b8dd13e866ca3b571375
-        run: |
-          archive="nu-${NU_VERSION}-x86_64-unknown-linux-musl"
-          curl --fail --silent --show-error --location \
-            --proto '=https' --proto-redir '=https' --tlsv1.2 \
-            "https://github.com/nushell/nushell/releases/download/${NU_VERSION}/${archive}.tar.gz" \
-            --output "${RUNNER_TEMP}/nu.tar.gz"
-          echo "${NU_SHA256}  ${RUNNER_TEMP}/nu.tar.gz" | sha256sum --check --strict
-          mkdir -p "${RUNNER_TEMP}/fjx-nu"
-          tar -xzf "${RUNNER_TEMP}/nu.tar.gz" -C "${RUNNER_TEMP}/fjx-nu" \
-            --strip-components=1 "${archive}/nu"
-          test "$("${RUNNER_TEMP}/fjx-nu/nu" --version)" = "${NU_VERSION}"
-          echo "${RUNNER_TEMP}/fjx-nu" >> "$GITHUB_PATH"
+      - name: Install just
+        uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
+        with:
+          tool: just@1.51.0
 
       - name: Install repository Rust toolchain
+        # rustup reads the channel, profile and components from rust-toolchain.toml.
         run: |
-          toolchain="$(nu --no-config-file -c 'open rust-toolchain.toml | get toolchain.channel')"
-          rustup toolchain install "$toolchain" --profile minimal --component clippy --component rustfmt
+          rustup toolchain install
           cargo --version
           rustc --version
 
       - name: Build and run local CLI tests
-        run: nu --no-config-file scripts/check.nu
+        run: just check
 
   windows:
     name: Native Windows token storage

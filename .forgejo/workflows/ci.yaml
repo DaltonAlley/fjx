@@ -39,8 +39,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
 
       - name: Build and test the CLI and release tooling
-        # The runner image has no just yet, so call the script directly.
-        run: bash scripts/check.sh --full
+        run: just check-full
 
       - name: Check for a version bump
         id: version

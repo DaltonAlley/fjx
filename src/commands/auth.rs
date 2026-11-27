@@ -1,4 +1,5 @@
 use std::ffi::{OsStr, OsString};
+use std::fmt::Write as _;
 use std::io::{self, BufRead, IsTerminal, Read};
 #[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -24,6 +25,15 @@ struct AuthRecord<'a> {
     host: &'a str,
     user: &'a str,
     source: &'a str,
+    ssh_aliases: &'a [String],
+}
+
+#[derive(Serialize)]
+struct LoginRecord<'a> {
+    kind: &'static str,
+    host: &'a str,
+    user: Option<&'a str>,
+    default: bool,
     ssh_aliases: &'a [String],
 }
 
@@ -447,6 +457,48 @@ pub(crate) fn status(args: &Args) -> Result<Outcome, Error> {
             source.as_str()
         )))
     }
+}
+
+/// List saved logins from the token file only: no network, no token check,
+/// and never a token in the output.
+pub(crate) fn list(args: &Args) -> Result<Outcome, Error> {
+    if args.dry_run || args.yes {
+        return Err(Error::usage(
+            "write safety flags are not valid for auth list",
+        ));
+    }
+    if args.host.is_some() || args.repo.is_some() {
+        return Err(Error::usage(
+            "auth list shows every saved login; --host and -R are not valid",
+        ));
+    }
+    let config = Config::load(&config::path()?)?;
+    let records: Vec<LoginRecord<'_>> = config
+        .logins()
+        .map(|(host, user, default, ssh_aliases)| LoginRecord {
+            kind: "login",
+            host,
+            user,
+            default,
+            ssh_aliases,
+        })
+        .collect();
+    if args.json {
+        return Outcome::json(&records);
+    }
+    let mut text = String::new();
+    for record in records {
+        writeln!(
+            text,
+            "{}\t{}\t{}\t{}",
+            record.host,
+            plain_field(record.user.unwrap_or("")),
+            record.default,
+            record.ssh_aliases.join(",")
+        )
+        .map_err(|error| Error::data(format!("could not format login list: {error}")))?;
+    }
+    Ok(Outcome::text(text))
 }
 
 pub(crate) fn logout(args: &Args) -> Result<Outcome, Error> {

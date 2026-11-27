@@ -57,6 +57,7 @@ fn run(args: &Args) -> Result<Outcome, Error> {
     match &args.command {
         Command::AuthLogin { options } => commands::auth::login(args, options),
         Command::AuthStatus => commands::auth::status(args),
+        Command::AuthList => commands::auth::list(args),
         Command::AuthLogout => commands::auth::logout(args),
         Command::AuthSetupGit => commands::auth::setup_git(args),
         Command::AuthGitCredential { operation } => {

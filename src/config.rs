@@ -276,6 +276,20 @@ impl Config {
         })
     }
 
+    /// Every saved login in host order, without its token: host, user (absent
+    /// in token files from before `auth setup-git` saved it), whether it is
+    /// the default host, and its SSH aliases.
+    pub(crate) fn logins(&self) -> impl Iterator<Item = (&str, Option<&str>, bool, &[String])> {
+        self.hosts.iter().map(|(host, entry)| {
+            (
+                host.as_str(),
+                entry.user.as_deref(),
+                self.default_host.as_deref() == Some(host.as_str()),
+                entry.ssh_aliases.as_slice(),
+            )
+        })
+    }
+
     pub(crate) fn ssh_aliases(&self, host: &Host) -> &[String] {
         self.hosts
             .get(host.as_str())

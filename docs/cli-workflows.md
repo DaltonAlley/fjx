@@ -273,6 +273,10 @@ host you did not log in to. `auth status --json` lists a host's aliases,
 login. Versions before the alias commands ignore the field and drop it when they
 rewrite the token file.
 
+`auth list` shows every saved login with its host, user, default flag and SSH
+aliases. It reads only the token file: it makes no request, checks no token and
+never prints one. Use `auth status` to check that a token still works.
+
 On Windows, saved tokens default to `%APPDATA%\fjx\hosts.json`, with a `%USERPROFILE%\AppData\Roaming` fallback. Files are created with a protected DACL granting access only to the current user. Before reading, fjx checks the open file's owner and DACL; only the current user, SYSTEM, and built-in Administrators may have access. Filesystems that cannot enforce or report these permissions fail closed. The file remains plaintext on disk, protected by Windows access controls. This works in SSH sessions without Credential Manager. Environment tokens still work without `HOME`, `APPDATA`, or `USERPROFILE` when `--host` or `FJX_HOST` supplies the host.
 
 Tokens never appear in command arguments or user-facing output. The client accepts HTTPS hosts and loopback HTTP hosts and rejects redirects.
@@ -284,6 +288,7 @@ Saved logins work on Unix and native Windows.
 ```text
 fjx auth login --host https://forgejo.example
 fjx auth status --json
+fjx auth list --json
 fjx auth setup-git --host https://forgejo.example
 fjx auth add-ssh-alias forge-ssh --host https://forgejo.example
 fjx repo view -R owner/repo

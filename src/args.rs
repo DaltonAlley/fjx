@@ -24,6 +24,7 @@ pub(crate) struct Args {
 pub(crate) enum Command {
     AuthLogin { options: LoginArgs },
     AuthStatus,
+    AuthList,
     AuthLogout,
     AuthSetupGit,
     AuthGitCredential { operation: GitCredentialOperation },
@@ -969,6 +970,7 @@ fn parse_command(words: &[String], o: &mut Specific) -> Result<Command, Error> {
             options: o.take_login()?,
         }),
         [a, b] if a == "auth" && b == "status" => Ok(Command::AuthStatus),
+        [a, b] if a == "auth" && b == "list" => Ok(Command::AuthList),
         [a, b] if a == "auth" && b == "logout" => Ok(Command::AuthLogout),
         [a, b] if a == "auth" && b == "setup-git" => Ok(Command::AuthSetupGit),
         [a, b, operation] if a == "auth" && b == "git-credential" => {
@@ -1662,6 +1664,7 @@ fn subcommands(group: &str) -> &'static [&'static str] {
         "auth" => &[
             "login",
             "status",
+            "list",
             "logout",
             "setup-git",
             "git-credential",

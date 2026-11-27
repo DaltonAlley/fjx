@@ -354,6 +354,9 @@ impl CommandMeta {
             "issue create" => arguments
                 .mutually_exclusive
                 .push(&["--board", "--board-id"]),
+            "auth list" => arguments.constraints.push(
+                "reads only the token file: no network, no token check, no tokens in output; --host and -R are not valid",
+            ),
             "auth add-ssh-alias" | "auth remove-ssh-alias" => {
                 arguments
                     .constraints
@@ -720,6 +723,15 @@ static COMMANDS: &[CommandMeta] = &[
         [],
         "fjx auth status --json",
         &["kind", "host", "user", "source", "ssh_aliases"],
+        false,
+        false
+    ),
+    command!(
+        "auth list",
+        "fjx auth list",
+        [],
+        "fjx auth list --json",
+        &["kind", "host", "user", "default", "ssh_aliases"],
         false,
         false
     ),
@@ -1363,6 +1375,7 @@ fn board_help(name: &str, text: &mut String) {
         "board move" => text.push_str("NUMBER is an issue or pull-request number. COLUMN is a column title, matched exactly and then ignoring case; --board matches a board title the same way. An issue without a card is added to the board; a card already on it moves. Reads the board, its columns and the issue first, including in dry runs.\n"),
         "board remove" => text.push_str("Removes the card and keeps the issue; board move adds it again. Reads each column to find the card, including in dry runs.\n"),
         "issue create" => text.push_str("--board and --board-id resolve the board before creating the issue and send its ID as projects. A forge without that field would ignore it, so fjx refuses a forge without a board API. Place the card with board move.\n"),
+        "auth list" => text.push_str("Lists every saved login from the token file, in host order. It makes no request and does not check tokens; use auth status for that. user is null (empty in plain output) when the file has no user name for the login. Plain output: HOST USER DEFAULT ALIASES, with ALIASES comma-separated.\n"),
         "auth add-ssh-alias" => text.push_str("Makes repository remotes whose SSH host is ALIAS (for example a Host entry in ~/.ssh/config) resolve to the saved login for --host. Remotes that name the host's own DNS name need no alias. The alias is saved with the login, kept across auth login, and removed by auth logout; auth status --json lists it. The remote's repository path is used as given.\n"),
         _ => {}
     }
@@ -1490,6 +1503,7 @@ pub(crate) fn output_fields(command: &crate::args::Command) -> Option<&'static [
     let (group, action) = match command {
         Command::AuthLogin { .. } => ("auth", "login"),
         Command::AuthStatus => ("auth", "status"),
+        Command::AuthList => ("auth", "list"),
         Command::AuthLogout => ("auth", "logout"),
         Command::AuthSetupGit => ("auth", "setup-git"),
         Command::AuthSshAlias { remove: true, .. } => ("auth", "remove-ssh-alias"),

@@ -276,3 +276,23 @@ fn command_help_and_schema_skip_context_stdin_and_network() {
         assert!(!result.stdout.is_empty());
     }
 }
+
+#[test]
+fn client_integration_commands_and_flags_are_documented() {
+    let list = schema(&["auth", "list"]);
+    assert_eq!(
+        list["commands"][0]["output_fields"],
+        serde_json::json!(["kind", "host", "user", "default", "ssh_aliases"])
+    );
+    assert_eq!(list["commands"][0]["write"], false);
+    assert!(text(&["auth"]).contains("fjx auth list"));
+    assert!(text(&["auth", "list"]).contains("no request"));
+    for create in [&["issue", "create"][..], &["pr", "create"]] {
+        assert!(text(create).contains("new URL alone on one stderr line"));
+        assert!(
+            schema(create)["commands"][0]["constraints"]
+                .to_string()
+                .contains("stderr")
+        );
+    }
+}

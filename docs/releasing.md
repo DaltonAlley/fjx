@@ -23,8 +23,11 @@ The release job has a separate runner slot and a 45-minute timeout. It first run
 `nu --no-config-file scripts/check.nu --full` for maintenance and release-tool
 verification, then builds all six targets from `release-targets.toml` with the
 pinned cargo-zigbuild image,
-using the source commit timestamp for archive metadata. It verifies binary
-formats, archive inventory, executable modes, and checksums, and runs the two
+using the source commit timestamp for archive metadata. It also sets
+`SOURCE_DATE_EPOCH` to that timestamp, so the Windows linker writes it into
+the `fjx.exe` PE header instead of the link time, and every build of a commit
+gives the same bytes. It verifies binary formats, the `fjx.exe` PE timestamp,
+archive inventory, executable modes, and checksums, and runs the two
 x86-64 Linux binaries with `--version`. ARM64 Linux, Windows, and macOS receive
 static format validation in this workflow; the optional full local smoke
 pipeline below is separate.
@@ -48,8 +51,12 @@ needed for publication. Build/test subprocesses do not inherit that token. Main 
 serialized and are not canceled by later pushes.
 
 If publication fails, inspect the tag, release, and asset state before rerunning
-the original workflow. The helpers preserve matching tags, reject mismatched
-tags or unexpected metadata/assets, and upload only missing draft attachments.
+the original workflow. The helpers preserve matching tags and reject mismatched
+tags or unexpected metadata/assets. Every run rebuilds all assets. While the
+release is a draft and its tag is not pushed, a rerun deletes all draft
+attachments and uploads the new set, because the job cannot read draft bytes
+to check old ones. Once the tag is pushed, attachments are never deleted: the
+tag push publishes the draft, and a rerun builds the same bytes.
 Failed builds create no tag or release; failed uploads or draft checks leave the
 release as a draft. A publication request can succeed even if its response is
 lost: rerun the original workflow to read the state and verify all assets again,
@@ -151,11 +158,12 @@ one target-named subdirectory per target, containing `fjx` (`fjx.exe` on Windows
 Use `--source-date-epoch` with a positive Unix timestamp for reproducible archive
 metadata. Keep generated assets out of source commits.
 
-Verification checks inventory, checksums, archive entries, executable modes,
-and binary formats:
+Container builds pass the same value as `SOURCE_DATE_EPOCH`. Verification
+checks inventory, checksums, archive entries, executable modes, binary formats,
+and that the `fjx.exe` PE timestamp equals the given epoch:
 
 ```sh
-nu --no-config-file scripts/package-release.nu verify ./release-assets 0.3.1
+nu --no-config-file scripts/package-release.nu verify ./release-assets 0.3.1 --source-date-epoch 1700000000
 ```
 
 These operations require GNU coreutils, `tar`, `gzip`, `zip`, `unzip`, and `file`.
@@ -200,18 +208,20 @@ wiki content, repository settings, secrets and package registries are not copied
 
 Rerun **Mirror GitHub releases** or dispatch `github-mirror.yaml` on `main` to
 recover a missed event or interrupted upload. The scheduled scan also recovers
-these cases. Reruns read server state, verify existing bytes and upload only
-missing draft assets. Exact releases require no writes. Conflicting assets,
-unexpected files, mismatched tags and incomplete public GitHub releases stop
-with an Actions failure for explicit repair. No asset, tag or release is deleted
-or overwritten by the copier. Release withdrawals/deletions are not propagated;
-handle those explicitly on both services. This is a mirror, not an archival
-backup of all Forgejo platform state.
+these cases. Reruns read server state. If the GitHub release is still a draft,
+they delete its assets and upload all twelve again, then verify the bytes.
+Exact public releases require no writes. Conflicting assets, unexpected files,
+mismatched tags and incomplete public GitHub releases stop with an Actions
+failure for explicit repair. The copier deletes assets only from GitHub drafts;
+it never deletes or overwrites a public asset, a tag or a release. Release
+withdrawals/deletions are not propagated; handle those explicitly on both
+services. This is a mirror, not an archival backup of all Forgejo platform state.
 
 ## Forgejo-specific publication helpers
 
-The `publish-plan`, `push-tag`, `upload-missing-assets`, `publish-release`, and
-`verify-final` commands use Forgejo API and authentication semantics. They require
+The `publish-plan`, `push-tag`, `delete-draft-assets`, `upload-missing-assets`,
+`publish-release`, and `verify-final` commands use Forgejo API and
+authentication semantics. They require
 `FORGEJO_API_URL`, `FORGEJO_REPOSITORY`, and `FORGEJO_TOKEN` in the
 publication environment. They are not a GitHub Releases integration and must
 not be pointed at GitHub as though the APIs were interchangeable.

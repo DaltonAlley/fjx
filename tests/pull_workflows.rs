@@ -726,3 +726,45 @@ fn api_errors_include_bounded_sanitized_forgejo_message() {
     );
     handle.join().unwrap();
 }
+
+#[test]
+fn create_prints_the_new_url_alone_on_stderr_only_in_plain_mode() {
+    let args = [
+        "pr", "create", "--head", "feature", "--title", "change", "--base", "main",
+    ];
+    let (host, handle) = server(vec![pull().to_string()]);
+    let output = run(&host, &args, None);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(handle.join().unwrap()[0].starts_with("POST /api/v1/repos/owner/repo/pulls "));
+    // Stdout keeps the five-field record; stderr adds only the URL line.
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    assert_eq!(stdout.trim_end().split('\t').count(), 5);
+    assert!(stdout.ends_with("\thttps://forge.example/dalton/monolith/pulls/8\n"));
+    assert_eq!(
+        output.stderr,
+        b"https://forge.example/dalton/monolith/pulls/8\n"
+    );
+
+    let (host, handle) = server(vec![pull().to_string()]);
+    let mut json = args.to_vec();
+    json.push("--json");
+    let output = run(&host, &json, None);
+    handle.join().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["number"], 8);
+
+    let (host, handle) = server(Vec::new());
+    let mut dry_run = args.to_vec();
+    dry_run.push("--dry-run");
+    let output = run(&host, &dry_run, None);
+    assert!(handle.join().unwrap().is_empty());
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+}

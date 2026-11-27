@@ -423,3 +423,46 @@ fn ambiguous_label_prevents_all_writes() {
     assert_eq!(requests.len(), 1);
     assert!(String::from_utf8_lossy(&output.stderr).contains("ambiguous"));
 }
+
+#[test]
+fn create_prints_the_new_url_alone_on_stderr_only_in_plain_mode() {
+    let (output, requests) = run(
+        &["issue", "create", "--title", "test"],
+        vec![(201, issue(), None)],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(requests[0].starts_with("POST /api/v1/repos/owner/repo/issues "));
+    // Stdout keeps the five-field record; stderr adds only the URL line.
+    let stdout = String::from_utf8(output.stdout).unwrap_or_else(|error| panic!("{error:?}"));
+    assert_eq!(stdout.lines().count(), 1);
+    assert_eq!(stdout.trim_end().split('\t').count(), 5);
+    assert!(stdout.ends_with("\thttps://forge.example/dalton/monolith/issues/12\n"));
+    assert_eq!(
+        output.stderr,
+        b"https://forge.example/dalton/monolith/issues/12\n"
+    );
+
+    let mut hostile = issue();
+    hostile["html_url"] = json!("https://forge.example/x\n\u{1b}[2J");
+    let (output, _) = run(
+        &["issue", "create", "--title", "test"],
+        vec![(201, hostile, None)],
+    );
+    assert!(output.status.success());
+    assert_eq!(output.stderr, b"https://forge.example/x\\n\\u{1B}[2J\n");
+
+    for extra in [&["--json"][..], &["--json", "--fields", "number"][..]] {
+        let mut args = vec!["issue", "create", "--title", "test"];
+        args.extend_from_slice(extra);
+        let (output, _) = run(&args, vec![(201, issue(), None)]);
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty(), "{extra:?}");
+        let value: Value =
+            serde_json::from_slice(&output.stdout).unwrap_or_else(|error| panic!("{error:?}"));
+        assert_eq!(value["number"], 12);
+    }
+}

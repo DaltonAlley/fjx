@@ -37,8 +37,8 @@ or the [GitHub mirror](https://github.com/DaltonAlley/fjx/releases).
 Check the archive, then extract it. For example, on Linux x86-64 with glibc:
 
 ```sh
-sha256sum --check fjx-0.5.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar -xzf fjx-0.5.1-x86_64-unknown-linux-gnu.tar.gz
+sha256sum --check fjx-0.5.2-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf fjx-0.5.2-x86_64-unknown-linux-gnu.tar.gz
 ./fjx --version
 ```
 

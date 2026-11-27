@@ -471,9 +471,9 @@ def authenticated_git(arguments: list[str]) -> Result:
     }))
 
 
-def secret_header(token: str) -> bytes:
+def secret_header(token: str, scheme: str = "token") -> bytes:
     # A curl config line; curl reads it from standard input (`--config -`).
-    return ("header = " + json.dumps(f"Authorization: token {token}", ensure_ascii=False) + "\n").encode("utf-8")
+    return ("header = " + json.dumps(f"Authorization: {scheme} {token}", ensure_ascii=False) + "\n").encode("utf-8")
 
 
 def curl_arguments(output: str, method: str, accept: str) -> list[str]:

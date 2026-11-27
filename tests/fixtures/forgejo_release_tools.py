@@ -1,7 +1,7 @@
 """Simulated external tools for the candidate/build/publish entry points.
 
-Port of forgejo-release-tools.nu. Git ancestry, packaging, checksums,
-comparisons and local smoke calls stay real. Each tool keeps its state in
+Git ancestry, packaging, checksums, comparisons and local smoke calls stay
+real. Each tool keeps its state in
 FAKE_STATE: `calls` (JSON lines of {event, value}), `tag`, `release.json`,
 `assets/`, `pending-tag-sync` and `next-asset-id`.
 

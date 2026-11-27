@@ -49,7 +49,7 @@ jobs:
           FORGEJO_REF: ${{ forgejo.ref }}
           BEFORE_SHA: ${{ forgejo.event.before }}
           CHECKOUT_SHA: ${{ forgejo.sha }}
-        run: nu --no-config-file scripts/forgejo-ci.nu candidate "$BEFORE_SHA" "$CHECKOUT_SHA" "$GITHUB_OUTPUT"
+        run: python3 scripts/forgejo_ci.py candidate "$BEFORE_SHA" "$CHECKOUT_SHA" "$GITHUB_OUTPUT"
 
   release:
     name: Build and publish release
@@ -83,7 +83,7 @@ jobs:
           FORGEJO_API_URL: ${{ forgejo.api_url }}
           FORGEJO_REPOSITORY: ${{ forgejo.repository }}
           CHECKOUT_SHA: ${{ forgejo.sha }}
-        run: nu --no-config-file scripts/forgejo-ci.nu publish "$CHECKOUT_SHA"
+        run: python3 scripts/forgejo_ci.py publish "$CHECKOUT_SHA"
 
   # Forgejo starts no workflow for events made by the job token, so the
   # release event never runs github-mirror.yaml. Copy the release here, right
@@ -111,4 +111,4 @@ jobs:
         env:
           FORGEJO_TOKEN: ${{ forgejo.token }}
           GH_RELEASE_MIRROR_TOKEN: ${{ secrets.GH_RELEASE_MIRROR_TOKEN }}
-        run: nu --no-config-file scripts/github-mirror.nu
+        run: python3 scripts/github_mirror.py

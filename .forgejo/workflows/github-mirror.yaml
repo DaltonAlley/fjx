@@ -32,4 +32,4 @@ jobs:
         env:
           FORGEJO_TOKEN: ${{ forgejo.token }}
           GH_RELEASE_MIRROR_TOKEN: ${{ secrets.GH_RELEASE_MIRROR_TOKEN }}
-        run: nu --no-config-file scripts/github-mirror.nu
+        run: python3 scripts/github_mirror.py

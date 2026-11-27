@@ -38,7 +38,7 @@ unset FJX_TOKEN FORGEJO_TOKEN GITEA_TOKEN GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN
 
 prerequisites=(cargo git bash script)
 if $full; then
-  # Release tools are Python; the CI and mirror tools are still Nushell.
+  # Release tools are Python; only tests/repository.nu still needs Nushell.
   prerequisites+=(python3 nu tar gzip zip unzip file sha256sum mktemp)
 fi
 for program in "${prerequisites[@]}"; do
@@ -65,7 +65,5 @@ run_check cargo clippy --locked --all-targets -- -D warnings
 RUSTDOCFLAGS='-D warnings' run_check cargo doc --locked --no-deps
 run_check nu --no-config-file tests/repository.nu
 run_check python3 -m unittest discover --start-directory tests --pattern 'test_*.py'
-run_check nu --no-config-file tests/forgejo-ci.nu
-run_check nu --no-config-file tests/github-mirror.nu
 run_check python3 scripts/release.py validate
 printf 'All fjx checks passed.\n'

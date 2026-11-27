@@ -17,7 +17,7 @@ def fail(message: str):
 
 
 def format_duration(seconds: float) -> str:
-    """Formats a duration the way Nushell prints one, for example 2ms or 1min 30sec."""
+    """Formats a duration in short units, for example 2ms or 1min 30sec."""
     remaining = round(seconds * 1_000_000_000)
     if remaining == 0:
         return "0sec"

@@ -10,7 +10,7 @@ native Windows Rust tests and Clippy. Neither workflow provides native macOS tes
 [The Forgejo workflow](../.forgejo/workflows/ci.yaml) runs the build and local CLI
 test gate on PRs, pushes to `main`, and manual checks. PR jobs have a five-minute
 timeout and use a prepared image on Dyad. The image includes the pinned Rust,
-just, Nushell and Python tools and a precompiled dependency cache. Each job
+just and Python tools and a precompiled dependency cache. Each job
 writes to its own container layer; there is no shared writable Cargo cache or
 container socket.
 New dependencies may require rebuilding the image to retain the timing target.
@@ -75,7 +75,7 @@ The maintained Dyad deployments live in
 independent `fjx-release` slot. Follow that repository's preparation and scoped
 installation instructions. The release image retains the digest-pinned
 cargo-zigbuild base from [ci/Containerfile](../ci/Containerfile), with pinned
-Rust 1.97.1, all six targets, just 1.51.0, Nushell 0.112.2, and Python 3.
+Rust 1.97.1, all six targets, just 1.51.0, and Python 3 with PyYAML.
 Refresh it when this toolchain or target contract changes.
 
 The release installer prepares the image in the actual rootless

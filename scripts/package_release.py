@@ -83,7 +83,7 @@ def archive_name(version: str, target: dict) -> str:
 
 
 def create_new(path: str, data: bytes) -> None:
-    # Like Nushell's `save`: never overwrite an existing asset.
+    # Never overwrite an existing asset.
     try:
         with open(path, "xb") as file:
             file.write(data)
@@ -231,7 +231,7 @@ def verify_one(asset_dir: str, version: str, target: dict, runtime: str, wine: s
 
 
 def listed_files(directory: str) -> list[str]:
-    """Lists regular files like Nushell's `ls DIR | where type == file`: no hidden files or links."""
+    """Lists regular files in DIR: no hidden files or links."""
     try:
         with os.scandir(directory) as entries:
             return sorted(entry.name for entry in entries

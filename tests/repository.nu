@@ -87,7 +87,7 @@ def test-forgejo-ci-contract [] {
   let checks = $workflow.jobs.checks
   check ($checks.timeout-minutes == 5) 'PR checks must have a five-minute budget'
   check ($checks.runs-on == fjx-ci) 'checks must use the prepared runner'
-  check ($checks.steps | any {|step| ($step.run? | default '') == 'bash scripts/check.sh --full' }) 'Forgejo must run the CLI and release-tool checks'
+  check ($checks.steps | any {|step| ($step.run? | default '') == 'just check-full' }) 'Forgejo must run the CLI and release-tool checks'
   let release = $workflow.jobs.release
   check ($release.needs == checks) 'release publication must wait for checks'
   check ($release.runs-on != $checks.runs-on) 'release builds must have a separate runner slot'

@@ -14,6 +14,7 @@ pkgs.mkShell {
     toolchain
     pkgs.nushell
     pkgs.just
+    (pkgs.python3.withPackages (ps: [ ps.pyyaml ]))
     pkgs.git
     pkgs.bash
     pkgs.util-linux

@@ -31,8 +31,8 @@ Dyad, and automatic version-triggered publication; see [releasing](releasing.md)
   script, and README together.
 - Review Dependabot proposals and keep the runtime dependency allowlist and
   exact pins. Review manifest and lockfile changes together, then run checks.
-- Review pinned container images, the Nu archive checksum and the `just`
-  version in GitHub CI manually; Dependabot does not update those pins.
+- Review pinned container images, the Nu and just archive checksums, and the
+  `just` version in GitHub CI manually; Dependabot does not update those pins.
 
 Repository checks parse the workflow, check local Markdown links, and guard
 CI permissions and package invariants. They do not replace a real GitHub

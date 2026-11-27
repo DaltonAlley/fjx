@@ -96,6 +96,8 @@ def test-forgejo-ci-contract [] {
   }
   let candidate = $checks.steps | where {|step| ($step.id? | default '') == version } | first
   let publisher = $release.steps | last
+  check ($candidate.run | str starts-with 'python3 scripts/forgejo_ci.py candidate ') 'version check must run the tested candidate step'
+  check ($publisher.run | str starts-with 'python3 scripts/forgejo_ci.py publish ') 'release job must run the tested publisher'
   for step in [$candidate $publisher] {
     check ($step.env.BEFORE_SHA == '${{ forgejo.event.before }}' and $step.env.CHECKOUT_SHA == '${{ forgejo.sha }}') 'candidate and publisher must receive the same exact push range'
     check ($step.env.FORGEJO_EVENT_NAME == '${{ forgejo.event_name }}' and $step.env.FORGEJO_REF == '${{ forgejo.ref }}') 'publication context guards must receive the actual workflow event'
@@ -110,7 +112,7 @@ def test-forgejo-ci-contract [] {
   check (not ($mirror.steps.0 | to json | str contains 'secrets.')) 'checkout must not consume the GitHub credential'
   let copier = $mirror.steps | last
   check ($copier.env.GH_RELEASE_MIRROR_TOKEN == '${{ secrets.GH_RELEASE_MIRROR_TOKEN }}') 'GitHub credential must be scoped to the copy step'
-  check ($copier.run == 'nu --no-config-file scripts/github-mirror.nu') 'release run must use the tested copier'
+  check ($copier.run == 'python3 scripts/github_mirror.py') 'release run must use the tested copier'
   let other_jobs = $workflow.jobs | reject github-mirror | to json
   check (not ($other_jobs | str contains 'secrets.')) 'build, test and publication jobs must not require repository secrets'
   let text = open --raw .forgejo/workflows/ci.yaml
@@ -131,7 +133,7 @@ def test-github-mirror-contract [] {
   check (not ($checkout | to json | str contains 'secrets.')) 'checkout must not consume the GitHub credential'
   let copier = $job.steps.1
   check ($copier.env.GH_RELEASE_MIRROR_TOKEN == '${{ secrets.GH_RELEASE_MIRROR_TOKEN }}') 'GitHub credential must be scoped to the copy step'
-  check ($copier.run == 'nu --no-config-file scripts/github-mirror.nu') 'workflow must run the tested copier'
+  check ($copier.run == 'python3 scripts/github_mirror.py') 'workflow must run the tested copier'
 }
 
 def main [] {

@@ -102,10 +102,9 @@ just check-full   # also fmt, Clippy, docs, release tools (Forgejo CI gate)
 just              # list all commands
 ```
 
-`just check-full` also needs Nushell 0.112.2, GNU coreutils, `tar`, `gzip`,
-`zip`, `unzip` and `file`. On Linux with Nix, [shell.nix](shell.nix) provides
-all tools: `nix-shell --run 'just check-full'`. It also has Python 3 with
-PyYAML for the planned script ports.
+`just check-full` also needs Python 3.11 or newer, Nushell 0.112.2 (for one
+repository test), GNU coreutils, `tar`, `gzip`, `zip`, `unzip` and `file`. On Linux with Nix,
+[shell.nix](shell.nix) provides all tools: `nix-shell --run 'just check-full'`.
 
 A version increase merged to `main` makes Forgejo CI build, check and publish
 a release for all six targets. A separate workflow copies it to GitHub. See

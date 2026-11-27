@@ -96,7 +96,7 @@ installer; use the dalton/nixos deployments above.
 
 ## Prepare a version
 
-These commands need just and Nushell 0.112.2. From the repository root:
+These commands need just and Python 3.11 or newer. From the repository root:
 
 ```sh
 just release-validate
@@ -198,7 +198,7 @@ only supplied to the copy step. A repository-scoped GitHub token needs Contents
 write permission; unlike code mirroring, release copying needs no Workflows scope.
 
 Every run scans all published Forgejo releases, including initial backfill.
-[The copier](../scripts/github-mirror.nu) checks exact source/destination tag
+[The copier](../scripts/github_mirror.py) checks exact source/destination tag
 hashes, all twelve asset names, archive checksums and downloaded byte parity.
 New GitHub releases remain drafts until verification finishes. Source drafts
 are skipped, prerelease flags are retained, and prereleases are never marked
@@ -226,6 +226,6 @@ authentication semantics. They require
 publication environment. They are not a GitHub Releases integration and must
 not be pointed at GitHub as though the APIs were interchangeable.
 
-The workflow uses these helpers through `scripts/forgejo-ci.nu`. They support
+The workflow uses these helpers through `scripts/forgejo_ci.py`. They support
 Forgejo instances hosted below a URL path such as `/forgejo`. Keep credentials
 out of logs and command examples, and never retry a write blindly.

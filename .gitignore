@@ -9,3 +9,6 @@
 .env
 .env.*
 !.env.example
+
+# Python bytecode from the release scripts and tests.
+__pycache__/

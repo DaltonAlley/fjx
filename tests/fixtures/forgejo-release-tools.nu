@@ -86,15 +86,35 @@ export def fake-curl [args: list<string>] {
   let assets = $env.FAKE_STATE | path join assets
   run-tag-sync $record
   log $method $url
-  if $url =~ '/releases/download/' {
+  # Like Forgejo 17 with the Actions job token: the web download routes give
+  # it public read access only, so draft asset bytes are 404 there. The API
+  # gives it write access but returns asset metadata, never bytes.
+  if $url =~ '/releases/download/' or $url =~ '/attachments/' {
     let name = $url | path basename
     log download $name
-    if ($env.FAKE_CORRUPT_DOWNLOAD? | default '') == 'true' { 'corrupt' | save --force --raw $output } else { cp --force ($assets | path join $name) $output }
+    if (open $record).draft { print --no-newline 404; return }
+    let file = $assets | path join $name
+    if ($env.FAKE_CORRUPT_DOWNLOAD? | default '') == 'true' {
+      # Same size, different bytes: only a byte comparison can catch it.
+      open --raw $file | into binary | bytes reverse | save --force --raw $output
+    } else { cp --force $file $output }
     print --no-newline 200
     return
   }
   if $method == GET {
-    if ($record | path exists) { cp --force $record $output; print --no-newline 200 } else { print --no-newline 404 }
+    if not ($record | path exists) { print --no-newline 404; return }
+    let release = open $record
+    # FAKE_DRAFT_METADATA models a draft whose first asset record is wrong.
+    let shown = if $release.draft and ($release.assets | is-not-empty) {
+      match ($env.FAKE_DRAFT_METADATA? | default '') {
+        size => ($release | update assets {|r| $r.assets | update 0 {|a| $a | update size ($a.size - 1) } })
+        origin => ($release | update assets {|r| $r.assets | update 0 {|a| $a | update browser_download_url ($a.browser_download_url | str replace 'https://forge.example' 'https://evil.example') } })
+        id => ($release | update assets {|r| $r.assets | update 0 {|a| $a | reject id } })
+        _ => $release
+      }
+    } else { $release }
+    $shown | to json | save --force --raw $output
+    print --no-newline 200
     return
   }
   if $method == POST and ($url | str ends-with '/releases') {
@@ -111,7 +131,9 @@ export def fake-curl [args: list<string>] {
     if $name in ($release.assets | get name) { error make {msg: 'existing asset overwritten'} }
     let source = argument $args '--form' | str replace 'attachment=@' ''
     cp $source ($assets | path join $name)
-    let asset = {id: (($release.assets | length) + 1), name: $name, browser_download_url: $"https://forge.example/forgejo/dalton/fjx/releases/download/fjx%2Fv1.2.10/($name)"}
+    let size = ls ($assets | path join $name) | first | get size | into int
+    let id = ($release.assets | length) + 1
+    let asset = {id: $id, name: $name, size: $size, uuid: $"00000000-0000-0000-0000-($id | fill --width 12 --alignment right --character '0')", type: attachment, browser_download_url: $"https://forge.example/forgejo/dalton/fjx/releases/download/fjx%2Fv1.2.10/($name)"}
     $release | update assets ($release.assets | append $asset) | to json | save --force --raw $record
     print --no-newline 201
     return

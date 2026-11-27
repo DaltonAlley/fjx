@@ -158,14 +158,21 @@ def test-orchestration [] {
       check (($upload_calls | where event == push-tag | is-empty)) 'tag was pushed before the draft was complete and verified'
       check (($upload_calls | where event == POST | where {|call| $call.value | str ends-with $failed_asset } | length) == 1) 'failed upload was retried blindly'
 
-      fresh-checkout $project
+      # The job token cannot read draft bytes, so the draft is checked by its
+      # API metadata. A wrong size, foreign URL or missing ID must stop before
+      # the tag push and the public transition.
       '' | save --force --raw ($state | path join calls)
-      let corrupt = run-ci $project [publish $revision] {FAKE_CORRUPT_DOWNLOAD: 'true'}
-      check ($corrupt.exit_code != 0) 'mismatched remote bytes must stop publication'
-      check ((open ($state | path join release.json)).draft) 'corrupt download published a release'
-      check ((calls $state | where event == PATCH | is-empty)) 'corrupt assets reached the public transition'
-      check ((calls $state | where event == push-tag | is-empty)) 'corrupt assets reached the tag push that publishes a draft'
-      check ((calls $state | where event == POST | length) == 11) 'retry must upload only the missing assets'
+      for metadata in [size origin id] {
+        fresh-checkout $project
+        let bad = run-ci $project [publish $revision] {FAKE_DRAFT_METADATA: $metadata}
+        check ($bad.exit_code != 0) $"wrong draft ($metadata) must stop publication"
+        check ((open ($state | path join release.json)).draft) $"wrong draft ($metadata) published a release"
+      }
+      let bad_calls = calls $state
+      check (($bad_calls | where event == PATCH | is-empty)) 'wrong draft metadata reached the public transition'
+      check (($bad_calls | where event == push-tag | is-empty)) 'wrong draft metadata reached the tag push that publishes a draft'
+      check (($bad_calls | where event == download | is-empty)) 'draft check tried to download draft bytes'
+      check (($bad_calls | where event == POST | length) == 11) 'retry must upload only the missing assets'
 
       fresh-checkout $project
       '' | save --force --raw ($state | path join calls)
@@ -175,9 +182,8 @@ def test-orchestration [] {
       check (($attempts | where event == POST | is-empty)) 'complete draft retry must not upload or recreate anything'
       check (($attempts | where event == PATCH | length) == 1) 'publication write was retried'
       let publication = $attempts | enumerate | where {|row| $row.item.event == PATCH } | first | get index
-      check (($attempts | take $publication | where event == download | get value | uniq | length) == 12) 'publication preceded complete remote byte verification'
-      let tag_push = $attempts | enumerate | where {|row| $row.item.event == push-tag } | first | get index
-      check (($attempts | take $tag_push | where event == download | get value | uniq | length) == 12) 'tag push preceded complete remote byte verification'
+      check (($attempts | take $publication | where event == download | is-empty)) 'publication tried to download draft bytes'
+      check (($attempts | where event == push-tag | length) == 1) 'complete draft must push the tag once'
       check (($attempts | where event == public | get value) == ['12']) 'release must become public once, with all twelve assets'
 
       fresh-checkout $project
@@ -213,12 +219,30 @@ def test-orchestration [] {
         check (not (open ($state | path join release.json)).draft) 'successful run left a draft'
         check (($events | where event == POST | length) == 13) 'new release must create one draft and twelve attachments'
         check (($events | where event == PATCH | length) == 1) 'successful run must publish once'
-        check (($events | where event == download | length) == 24) 'successful run must verify all bytes before and after publication'
+        check (($events | where event == download | length) == 12) 'successful run must verify all bytes once after publication'
         check (($events | where event == public | get value) == ['12']) $"($sync) tag sync: release must become public once, with all twelve assets"
         check (($events | where event == tag-sync | length) == (if $sync == queued { 1 } else { 0 })) 'tag sync model did not run as configured'
         let tag_push = $events | enumerate | where {|row| $row.item.event == push-tag } | first | get index
-        check (($events | take $tag_push | where event == download | length) == 12) 'tag push must follow complete draft verification'
+        check (($events | take $tag_push | where event == download | is-empty)) 'tag push must not wait on draft bytes the job token cannot read'
+        check (($events | skip $tag_push | where event == download | length) == 12) 'public release bytes must be verified after the tag push'
       }
+
+      # Known limit: a same-size byte mismatch is only caught after publication.
+      # The job must still fail, and a rerun must not change the public release.
+      rm --force ($state | path join release.json) ($state | path join tag) ($state | path join pending-tag-sync)
+      rm --recursive ($state | path join assets)
+      mkdir ($state | path join assets)
+      do { ^$real_git tag --delete fjx/v1.2.10 } | complete | ignore
+      fresh-checkout $project
+      '' | save --force --raw ($state | path join calls)
+      let late = run-ci $project [publish $revision] {FAKE_CORRUPT_DOWNLOAD: 'true'}
+      check ($late.exit_code != 0) 'same-size byte mismatch must fail the job'
+      check ($late.stderr | str contains 'does not match the locally checked output') $"same-size mismatch must be reported: ($late.stderr)"
+      check (not (open ($state | path join release.json)).draft) 'same-size mismatch is expected to be found only after publication'
+      fresh-checkout $project
+      '' | save --force --raw ($state | path join calls)
+      check ((run-ci $project [publish $revision] {FAKE_CORRUPT_DOWNLOAD: 'true'}).exit_code != 0) 'rerun must still report the byte mismatch'
+      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag] }) 'rerun modified a public release with mismatched bytes'
     }
   } catch {|error|
     cd ($root | path dirname)

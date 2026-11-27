@@ -4,6 +4,8 @@
 FROM ghcr.io/rust-cross/cargo-zigbuild:0.23.3@sha256:76ed3823d8cd9d8b409b10f9c4cda292b0c8699175ea4c0a2d541775c8184d2b AS build
 ARG TARGET
 ARG EXECUTABLE
+# Pins the Windows PE header timestamp to the commit time.
+ARG SOURCE_DATE_EPOCH
 RUN test "$(/usr/local/cargo/bin/cargo-zigbuild --version)" = "cargo-zigbuild 0.23.3" && \
     test "$(zig version)" = 0.16.0 && \
     test "$SDKROOT" = /opt/MacOSX11.3.sdk
@@ -18,7 +20,7 @@ RUN rustup target add "$TARGET"
 WORKDIR /source
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo zigbuild --locked --release --target "$TARGET"
+RUN test -n "$SOURCE_DATE_EPOCH" && cargo zigbuild --locked --release --target "$TARGET"
 RUN mkdir /out && cp "target/$TARGET/release/$EXECUTABLE" "/out/$EXECUTABLE"
 
 FROM scratch

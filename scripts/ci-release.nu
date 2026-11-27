@@ -34,7 +34,7 @@ export def build-package-smoke [version: string, source_date_epoch: string, --ru
 
   let wine = (^which wine | str trim)
   if ($wine | is-empty) { fail "Wine is required to smoke the Windows release target" }
-  verify-assets $asset_dir $version --runtime=$runtime --wine=$wine --smoke
+  verify-assets $asset_dir $version --source-date-epoch ($source_date_epoch | into int) --runtime=$runtime --wine=$wine --smoke
 }
 
 def "main build-package-smoke" [version: string, source_date_epoch: string, --runtime: string = docker] {

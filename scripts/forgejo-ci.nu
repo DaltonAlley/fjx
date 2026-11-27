@@ -50,7 +50,11 @@ export def build-assets [revision: string] {
   let binaries = mktemp -d
   try {
     for target in (release-targets) {
-      checked cargo [zigbuild --locked --release --target $target.triple]
+      # The Windows linker writes the link time into the PE header unless
+      # SOURCE_DATE_EPOCH is set. Pin it so a rerun builds the same bytes.
+      with-env {SOURCE_DATE_EPOCH: ($epoch | into string)} {
+        checked cargo [zigbuild --locked --release --target $target.triple]
+      }
       let directory = $binaries | path join $target.triple
       mkdir $directory
       let binary = $env.CARGO_TARGET_DIR? | default ($project_dir | path join target) | path join $target.triple release $target.executable
@@ -65,7 +69,7 @@ export def build-assets [revision: string] {
     with-env {FJX_PACKAGE_BIN_ROOT: $binaries} {
       checked $nu.current-exe [--no-config-file $package_script publish-assets all --source-date-epoch ($epoch | into string)]
     }
-    verify-assets publish-assets $version
+    verify-assets publish-assets $version --source-date-epoch $epoch
   } catch {|error|
     rm --recursive --force $binaries
     error make $error.raw

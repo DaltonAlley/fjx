@@ -141,6 +141,15 @@ def test-orchestration [] {
       check (not (($state | path join tag) | path exists)) 'failed build pushed a tag'
       check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag] }) 'failed build attempted a write'
 
+      # A Windows build whose PE timestamp is not the commit time is not
+      # reproducible, so a rerun could not rebuild the same bytes.
+      '' | save --force --raw ($state | path join calls)
+      let unpinned = run-ci $project [publish $revision] {FAKE_UNPINNED_LINK: 'true'}
+      check ($unpinned.exit_code != 0) 'unpinned Windows build must stop publication'
+      check ($unpinned.stderr | str contains 'PE timestamp') $"unpinned build failure omitted its reason: ($unpinned.stderr)"
+      check (calls $state | all {|call| $call.event not-in [POST PATCH push-tag] }) 'unpinned build attempted a write'
+      fresh-checkout $project
+
       '' | save --force --raw ($state | path join calls)
       let first_asset = 'fjx-1.2.10-aarch64-apple-darwin.tar.gz'
       let failed_asset = $first_asset + '.sha256'

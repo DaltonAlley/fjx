@@ -140,10 +140,26 @@ export def fake-curl [args: list<string>] {
     let source = argument $args '--form' | str replace 'attachment=@' ''
     cp $source ($assets | path join $name)
     let size = ls ($assets | path join $name) | first | get size | into int
-    let id = ($release.assets | length) + 1
+    # Forgejo never reuses an attachment ID, even after a delete.
+    let counter = $env.FAKE_STATE | path join next-asset-id
+    let id = if ($counter | path exists) { open --raw $counter | into int } else { 1 }
+    ($id + 1 | into string) | save --force --raw $counter
     let asset = {id: $id, name: $name, size: $size, uuid: $"00000000-0000-0000-0000-($id | fill --width 12 --alignment right --character '0')", type: attachment, browser_download_url: $"https://forge.example/forgejo/dalton/fjx/releases/download/fjx%2Fv1.2.10/($name)"}
     $release | update assets ($release.assets | append $asset) | to json | save --force --raw $record
     print --no-newline 201
+    return
+  }
+  if $method == DELETE and $url =~ '/releases/42/assets/[0-9]+$' {
+    let release = open $record
+    if not $release.draft { error make {msg: 'public release asset deleted'} }
+    let tag = $env.FAKE_STATE | path join tag
+    if ($tag | path exists) { error make {msg: 'draft asset deleted after the tag push'} }
+    let id = $url | path basename | into int
+    let asset = $release.assets | where id == $id
+    if ($asset | is-empty) { print --no-newline 404; return }
+    rm ($assets | path join $asset.0.name)
+    $release | update assets ($release.assets | where id != $id) | to json | save --force --raw $record
+    print --no-newline 204
     return
   }
   if $method == PATCH {

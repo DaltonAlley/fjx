@@ -20,7 +20,7 @@ and after the push. An unchanged version skips publication; decreases and
 inconsistent version files fail. Initial repository imports do not publish.
 
 The release job has a separate runner slot and a 45-minute timeout. It first runs
-`nu --no-config-file scripts/check.nu --full` for maintenance and release-tool
+`just check-full` for maintenance and release-tool
 verification, then builds all six targets from `release-targets.toml` with the
 pinned cargo-zigbuild image,
 using the source commit timestamp for archive metadata. It also sets
@@ -96,12 +96,12 @@ provide image retention; use the separate maintained deployments on Dyad.
 
 ## Prepare a version
 
-Use Nushell 0.112.2 with `--no-config-file`. From the repository root:
+These commands need just and Nushell 0.112.2. From the repository root:
 
 ```sh
-nu --no-config-file scripts/release.nu validate
-nu --no-config-file scripts/release.nu prepare --dry-run patch
-nu --no-config-file scripts/release.nu prepare patch
+just release-validate
+just release-prepare --dry-run patch
+just release-prepare patch
 ```
 
 On Linux with Nix, enter `nix-shell` from the repository root before running
@@ -124,7 +124,7 @@ leave it unset for ordinary standalone use.
 Tags use `fjx/vVERSION`, for example `fjx/v0.3.1`. Validate a proposed tag with:
 
 ```sh
-nu --no-config-file scripts/release.nu validate-tag fjx/v0.3.1
+just release-validate-tag fjx/v0.3.1
 ```
 
 For Forgejo, let the workflow create the release tag. For manual publication,
@@ -144,7 +144,7 @@ review the intended remote before pushing a tag.
 | `x86_64-pc-windows-gnu` | `zip`, containing `fjx.exe` |
 
 ```sh
-nu --no-config-file scripts/package-release.nu ./release-assets x86_64-unknown-linux-gnu
+just package ./release-assets x86_64-unknown-linux-gnu
 ```
 
 Omit the target or use `all` for all six. Each archive has a `.sha256` file.
@@ -163,7 +163,7 @@ checks inventory, checksums, archive entries, executable modes, binary formats,
 and that the `fjx.exe` PE timestamp equals the given epoch:
 
 ```sh
-nu --no-config-file scripts/package-release.nu verify ./release-assets 0.3.1 --source-date-epoch 1700000000
+just package-verify ./release-assets 0.3.1 --source-date-epoch 1700000000
 ```
 
 These operations require GNU coreutils, `tar`, `gzip`, `zip`, `unzip`, and `file`.

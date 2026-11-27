@@ -92,17 +92,19 @@ examples. Help works offline.
 
 ## Development and releases
 
-Use Rust 1.97.1 and Nushell 0.112.2. Tests also need Git, Bash and `script`
-(util-linux). They run against local fixtures and need no Forgejo account.
+Use Rust 1.97.1 and [just](https://github.com/casey/just). Tests also need Git,
+Bash and `script` (util-linux). They run against local fixtures and need no
+Forgejo account.
 
 ```sh
-nu --no-config-file scripts/check.nu          # build and tests (GitHub CI gate)
-nu --no-config-file scripts/check.nu --full   # also fmt, Clippy, docs, release tools (Forgejo CI gate)
+just check        # build and tests (GitHub CI gate)
+just check-full   # also fmt, Clippy, docs, release tools (Forgejo CI gate)
+just              # list all commands
 ```
 
-`--full` also needs GNU coreutils, `tar`, `gzip`, `zip`, `unzip` and `file`.
-On Linux with Nix, [shell.nix](shell.nix) provides all tools:
-`nix-shell --run 'nu --no-config-file scripts/check.nu --full'`.
+`just check-full` also needs Nushell 0.112.2, GNU coreutils, `tar`, `gzip`,
+`zip`, `unzip` and `file`. On Linux with Nix, [shell.nix](shell.nix) provides
+all tools: `nix-shell --run 'just check-full'`.
 
 A version increase merged to `main` makes Forgejo CI build, check and publish
 a release for all six targets. A separate workflow copies it to GitHub. See

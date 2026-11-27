@@ -45,12 +45,15 @@ def test-ci-contract [] {
           check ($step.with.persist-credentials == false) 'checkout must not leave credentials for PR code'
         }
       }
-      if (($step.run? | default '' | str trim) == 'nu --no-config-file scripts/check.nu') {
+      if (($step.run? | default '' | str trim) == 'just check') {
         $check_steps = $check_steps + 1
       }
     }
   }
   check ($check_steps > 0) 'CI must run the same check command as contributors'
+  let justfile = open --raw justfile
+  check ($justfile | str contains "\ncheck:\n    bash scripts/check.sh\n") 'just check must run the check script'
+  check ($justfile | str contains "\ncheck-full:\n    bash scripts/check.sh --full\n") 'just check-full must run the full check script'
 
   let updates = (open .github/dependabot.yml).updates
   check (($updates | get package-ecosystem | sort) == [cargo github-actions]) 'monitor Cargo and Actions dependencies'
@@ -84,7 +87,7 @@ def test-forgejo-ci-contract [] {
   let checks = $workflow.jobs.checks
   check ($checks.timeout-minutes == 5) 'PR checks must have a five-minute budget'
   check ($checks.runs-on == fjx-ci) 'checks must use the prepared runner'
-  check ($checks.steps | any {|step| ($step.run? | default '') == 'nu --no-config-file scripts/check.nu --full' }) 'Forgejo must run the CLI and release-tool checks'
+  check ($checks.steps | any {|step| ($step.run? | default '') == 'bash scripts/check.sh --full' }) 'Forgejo must run the CLI and release-tool checks'
   let release = $workflow.jobs.release
   check ($release.needs == checks) 'release publication must wait for checks'
   check ($release.runs-on != $checks.runs-on) 'release builds must have a separate runner slot'

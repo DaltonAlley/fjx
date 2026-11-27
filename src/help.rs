@@ -192,6 +192,7 @@ const BOARD_RESULT: &[&str] = &[
 const SSH_ALIAS_RESULT: &[&str] = &["kind", "action", "ok", "host", "ssh_alias"];
 const BOARD_FLAG: &str =
     "--board TITLE | --board-id ID (default: the repository's only open board)";
+const CREATED_URL: &str = "plain output also writes the new URL alone on one stderr line after a successful create; --json and --dry-run keep stderr empty";
 const PAGING: &str = "--page N (default 1), --all, --limit N (default 30)";
 const BODY: &str = "--body TEXT | --body-file PATH|-";
 const METADATA: &str = "--label NAME, --label-id ID, --assignee NAME (repeatable), --milestone NAME | --milestone-id ID";
@@ -461,6 +462,7 @@ impl CommandMeta {
             "issue list" | "pr list" => arguments
                 .constraints
                 .push("--sort is forwarded to Forgejo; accepted values depend on the server"),
+            "issue create" | "pr create" => arguments.constraints.push(CREATED_URL),
             _ => {}
         }
     }
@@ -1423,6 +1425,9 @@ pub(crate) fn render(path: &[String]) -> Result<Outcome, Error> {
         if command.name == "webhook edit" {
             text.push_str("Forgejo 17 resets omitted events, branch_filter and authorization_header. fjx reads and preserves them, even during dry runs; concurrent edits can race. Signing-secret rotation and workflow/action-run/package subscription changes require a replacement hook because the server ignores those edits.\n");
             text.push_str("Hooks reporting every event require a replacement: the API hides Send everything mode, whose edits can lose CI/package subscriptions. Explicit all-event selections are indistinguishable and also refused, including dry runs.\n");
+        }
+        if matches!(command.name, "issue create" | "pr create") {
+            writeln!(text, "Stderr: {CREATED_URL}.").map_err(format_error)?;
         }
         if command.name == "pr merge" {
             text.push_str("Safety: --match-head guards the expected head SHA; --auto requests server-side automatic merge.\n");

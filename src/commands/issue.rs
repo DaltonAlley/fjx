@@ -238,7 +238,8 @@ fn create(
         return repo.dry_run(common.json, "POST", &path, &payload);
     }
     let value: IssueResponse = repo.write("POST", &path, &payload, "issue")?;
-    render_one(common.json, value)
+    let url = value.html_url.clone();
+    Ok(render_one(common.json, value)?.with_created_url(common.json, &url))
 }
 
 fn comment(common: &Args, number: u64, source: &crate::args::BodySource) -> Result<Outcome, Error> {

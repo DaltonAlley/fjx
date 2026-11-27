@@ -7,6 +7,9 @@ use crate::error::Error;
 
 pub(crate) struct Outcome {
     pub(crate) bytes: Vec<u8>,
+    /// Extra text for stderr, written after stdout. Stdout stays the stable
+    /// result. The MCP server ignores this field.
+    pub(crate) stderr: Vec<u8>,
     pub(crate) code: u8,
 }
 
@@ -62,7 +65,9 @@ pub(crate) fn project(outcome: Outcome, fields: &[String]) -> Result<Outcome, Er
         ),
         value => project_record(value, fields)?,
     };
-    Ok(Outcome::json(&projected)?.with_code(outcome.code))
+    Ok(Outcome::json(&projected)?
+        .with_code(outcome.code)
+        .with_stderr(outcome.stderr))
 }
 
 fn project_record(value: Value, fields: &[String]) -> Result<Value, Error> {
@@ -99,7 +104,23 @@ impl Outcome {
     pub(crate) fn text(text: impl Into<Vec<u8>>) -> Self {
         Self {
             bytes: text.into(),
+            stderr: Vec::new(),
             code: 0,
+        }
+    }
+
+    pub(crate) fn with_stderr(mut self, text: impl Into<Vec<u8>>) -> Self {
+        self.stderr = text.into();
+        self
+    }
+
+    /// After a create in plain mode, also print the new URL alone on stderr,
+    /// as `gh` does, so a watcher can link it. JSON output keeps stderr empty.
+    pub(crate) fn with_created_url(self, json: bool, url: &str) -> Self {
+        if json {
+            self
+        } else {
+            self.with_stderr(format!("{}\n", plain_field(url)))
         }
     }
 
